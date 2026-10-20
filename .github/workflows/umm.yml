@@ -1,0 +1,133 @@
+name: UM
+
+run-name: UM
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: um
+  cancel-in-progress: false
+
+jobs:
+  vm:
+    name: dev box
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      TS_HOSTNAME: github-runner-${{ github.run_id }}
+      REPO_DIR: /home/runner/${{ github.event.repository.name }}
+
+    steps:
+      - name: Check inputs and secrets
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+          SSH: ${{ secrets.SSH }}
+          TS: ${{ secrets.TS }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for v in TOKEN SSH TS; do
+            [[ -n "${!v}" ]] || missing+=("$v")
+          done
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing repository secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+          printf '%s\n' "$SSH" > "$RUNNER_TEMP/authorized_keys"
+          ssh-keygen -l -f "$RUNNER_TEMP/authorized_keys" >/dev/null \
+            || { echo "::error::SSH is not a valid public key"; exit 1; }
+
+
+      - name: Install Tailscale
+        run: curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Clone repo
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          set -euo pipefail
+          gh repo clone "$GITHUB_REPOSITORY" "$REPO_DIR" -- --quiet --branch "$GITHUB_REF_NAME"
+
+      - name: Store GitHub token for the dev container
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          set -euo pipefail
+          (umask 077; printf '%s' "$TOKEN" > "$HOME/.token")
+          {
+            echo
+            echo 'case $- in'
+            echo '  *i*)'
+            echo '    [ -r "$HOME/.token" ] && export GITHUB_TOKEN="$(cat "$HOME/.token")"'
+            echo "    cd \"$REPO_DIR\" 2>/dev/null || true"
+            echo '    ;;'
+            echo 'esac'
+          } >> "$HOME/.profile"
+
+      - name: Join tailnet
+        env:
+          TS: ${{ secrets.TS }}
+        run: |
+          set -euo pipefail
+          sudo tailscale up \
+            --auth-key="$TS" \
+            --hostname="$TS_HOSTNAME" \
+            --accept-dns=false \
+            --timeout=90s
+          echo "TS_IP=$(tailscale ip -4)" >> "$GITHUB_ENV"
+
+      - name: Start SSH (key auth only)
+        run: |
+          set -euo pipefail
+
+          install -d -m 700 "$HOME/.ssh"
+          install -m 600 "$RUNNER_TEMP/authorized_keys" "$HOME/.ssh/authorized_keys"
+          rm -f "$RUNNER_TEMP/authorized_keys"
+
+          printf '%s\n' \
+            "PasswordAuthentication no" \
+            "KbdInteractiveAuthentication no" \
+            "PermitRootLogin no" \
+            "AllowUsers runner" \
+            | sudo tee /etc/ssh/sshd_config.d/10-um.conf >/dev/null
+
+          sudo sshd -t
+          sudo systemctl enable --now ssh
+          sudo systemctl restart ssh
+
+      - name: Pre-build dev container (background)
+        run: |
+          setsid nohup bash "$REPO_DIR/container/doc.sh" --prebuild \
+            > "$HOME/prebuild.log" 2>&1 < /dev/null &
+
+      - name: Runner is ready
+        run: |
+          tailscale status
+
+          {
+            echo "### Runner ready"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Host | \`$TS_HOSTNAME\` |"
+            echo "| Tailscale IP | \`$TS_IP\` |"
+            echo "| Connect | \`./connect.sh\` or \`ssh runner@$TS_IP\` |"
+            echo "| Lifetime | 6h max |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "======================================"
+          echo "READY  ssh runner@$TS_IP"
+          echo "======================================"
+
+      - name: Keep runner alive
+        run: sleep 21600
+
+      - name: Leave tailnet
+        if: always()
+        run: sudo tailscale logout || true
