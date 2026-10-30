@@ -24,10 +24,45 @@ ok()   { printf '%s\n' "${GRN}ok${RST} $*" >&2; }
 warn() { printf '%s\n' "${YLW}!${RST} $*" >&2; }
 die()  { printf '%s\n' "${RED}error${RST} $*" >&2; exit 1; }
 
-progress()      { if [[ -t 2 ]]; then printf '\r\e[K%s' "${DIM}$1${RST}" >&2; fi; }
-progress_done() { if [[ -t 2 ]]; then printf '\r\e[K' >&2; fi; }
+progress() {
+  if [[ -t 2 ]]; then printf '\r\e[K%s' "${DIM}$1${RST}" >&2; fi
+}
+progress_done() { if [[ -t 2 ]]; then printf '\r\e[K' >&2; fi }
 
-(($# == 0)) || die "connect.sh takes no arguments"
+usage() {
+  cat <<'USAGE'
+connect.sh - connect to the Oir runner.
+
+  ./connect.sh               start a runner, or join one that's already running
+  ./connect.sh stop          pick a running runner and stop it
+  ./connect.sh push <path>   copy a file/dir into the container's ~/dev
+  ./connect.sh pull <name>   copy ~/dev/<name> from the container back here
+USAGE
+}
+
+ACTION=connect
+TRANSFER=""
+case "${1:-}" in
+  "")
+    ;;
+  stop)
+    ACTION=stop
+    ;;
+  push|pull)
+    ACTION=$1
+    shift
+    (($# >= 1)) || die "Usage: ./connect.sh $ACTION <file-or-dir>"
+    TRANSFER="$1"
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    die "Unknown command: $1 (try --help)"
+    ;;
+esac
+(($# <= 1)) || die "Too many arguments (try --help)"
 
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
@@ -44,10 +79,20 @@ latest_id() {
     --json databaseId --jq '.[0].databaseId // empty'
 }
 
-active_id() {
-  gh run list -R "$REPO" -w "$WORKFLOW" -e workflow_dispatch -L 10 \
-    --json databaseId,status \
-    --jq '[.[] | select(.status != "completed")][0].databaseId // empty'
+load_active_runs() {
+  IDS=(); STARTS=(); STATS=(); BRANCHES=()
+  local id status started branch
+  while IFS=$'\t' read -r id status started branch; do
+    [[ -n "$id" ]] || continue
+    IDS+=("$id")
+    STATS+=("$status")
+    STARTS+=("$started")
+    BRANCHES+=("$branch")
+  done < <(gh run list -R "$REPO" -w "$WORKFLOW" -e workflow_dispatch -L 20 \
+             --json databaseId,status,startedAt,createdAt,headBranch \
+             --jq '[.[] | select(.status != "completed")]
+                   | sort_by(if .status == "in_progress" then 0 elif .status == "queued" then 1 else 2 end)
+                   | .[] | [.databaseId, .status, (.startedAt // .createdAt), (.headBranch // "-")] | @tsv')
 }
 
 run_status() {
@@ -73,6 +118,138 @@ maybe_stop() {
   fi
 
   info "Leaving the runner up. Stop it later with: gh run cancel $RUN_ID -R $REPO"
+}
+
+elapsed_secs() {
+  local start=$1 secs
+  secs=$(date -d "$start" +%s 2>/dev/null) || { printf '0'; return; }
+  secs=$(( $(date +%s) - secs ))
+  (( secs >= 0 )) || secs=0
+  printf '%s' "$secs"
+}
+
+fmt_dur() {
+  local s=$1 h m
+  if (( s >= 3600 )); then
+    h=$(( s / 3600 ))
+    m=$(( (s % 3600) / 60 ))
+    if (( m > 0 )); then printf '%dh%dm' "$h" "$m"; else printf '%dh' "$h"; fi
+  elif (( s >= 60 )); then
+    printf '%dm' $(( s / 60 ))
+  else
+    printf '%ds' "$s"
+  fi
+}
+
+read_key() {
+  local k rest
+  IFS= read -rsn1 k || return 1
+  if [[ "$k" == $'\e' ]]; then
+    IFS= read -rsn2 -t 0.05 rest || true
+    case "$rest" in
+      '[A'|'OA') printf 'up' ;;
+      '[B'|'OB') printf 'down' ;;
+      *) printf 'other' ;;
+    esac
+  elif [[ -z "$k" || "$k" == $'\n' ]]; then
+    printf 'enter'
+  else
+    printf '%s' "$k"
+  fi
+}
+
+run_menu() {
+  local header=$1 allow_new=$2 start=${3:-0}
+  local extra=0 n i line key j
+  (( allow_new )) && extra=1
+  n=$(( ${#IDS[@]} + extra ))
+  PICKED=$start
+  DRAWN=0
+
+  render() {
+    if (( DRAWN > 0 )); then printf '\e[%dA' "$DRAWN" >&2; fi
+    for (( i = 0; i < n; i++ )); do
+      if (( extra == 1 && i == 0 )); then
+        line="+ dispatch a new runner"
+      else
+        j=$(( i - extra ))
+        line="$(printf 'run %s  %-6s %-11s %s  github-runner-%s' \
+                  "${IDS[j]}" "$(fmt_dur "$(elapsed_secs "${STARTS[j]}")")" \
+                  "${STATS[j]}" "${BRANCHES[j]}" "${IDS[j]}")"
+      fi
+      if (( i == PICKED )); then
+        printf '\r\e[K%s %s\n' "${GRN}>${RST}" "${BOLD}${line}${RST}" >&2
+      else
+        printf '\r\e[K  %s\n' "$line" >&2
+      fi
+    done
+    DRAWN=$n
+  }
+
+  printf '%s\n' "$header" >&2
+  render
+
+  while :; do
+    key="$(read_key)" || { echo >&2; return 1; }
+    case "$key" in
+      up|k) if (( PICKED > 0 )); then PICKED=$(( PICKED - 1 )); fi ;;
+      down|j) if (( PICKED < n - 1 )); then PICKED=$(( PICKED + 1 )); fi ;;
+      q|Q) return 1 ;;
+      enter) return 0 ;;
+      *) continue ;;
+    esac
+    render
+  done
+}
+
+cmd_stop() {
+  [[ -t 0 ]] || die "'stop' needs an interactive terminal"
+
+  load_active_runs
+  if (( ${#IDS[@]} == 0 )); then
+    info "No running runners."
+    return 0
+  fi
+
+  run_menu "Running runners (up/down to move, enter to stop, q to quit):" 0 || return 0
+
+  local id="${IDS[PICKED]}"
+  info "Cancelling run #$id (github-runner-$id)"
+  if gh run cancel "$id" -R "$REPO" >/dev/null 2>&1; then
+    ok "Runner stopped"
+  else
+    warn "Couldn't cancel run #$id (maybe it already finished)"
+    return 1
+  fi
+}
+
+cmd_share() {
+  load_active_runs
+  if (( ${#IDS[@]} == 0 )); then
+    die "No running runner. Start one with ./connect.sh"
+  fi
+
+  if (( ${#IDS[@]} == 1 )); then
+    RUN_ID="${IDS[0]}"
+  else
+    run_menu "Running runners (up/down to move, enter to select, q to quit):" 0 0 || exit 0
+    RUN_ID="${IDS[PICKED]}"
+  fi
+
+  RUNNER_IP="$(tailscale ip -4 "github-runner-$RUN_ID" 2>/dev/null | head -n1 || true)"
+  [[ -n "$RUNNER_IP" ]] || die "github-runner-$RUN_ID isn't on the tailnet (yet)"
+
+  ssh "${SSH_OPTS[@]}" "$SSH_USER@$RUNNER_IP" 'mkdir -p ~/dev'
+
+  if [[ "$ACTION" == push ]]; then
+    info "Pushing $TRANSFER to github-runner-$RUN_ID:~/dev"
+    scp -r "${SSH_OPTS[@]}" "$TRANSFER" "$SSH_USER@$RUNNER_IP:dev/"
+    ok "In the container at ~/dev/$(basename "$TRANSFER")"
+  else
+    info "Pulling github-runner-$RUN_ID:~/dev/$TRANSFER"
+    scp -r "${SSH_OPTS[@]}" "$SSH_USER@$RUNNER_IP:dev/$TRANSFER" .
+    ok "Pulled $TRANSFER"
+  fi
 }
 
 on_interrupt() {
@@ -127,7 +304,7 @@ wait_for_runner() {
       die "Timed out after ${WAIT_RUNNER}s. Check: gh run view $RUN_ID -R $REPO --web"
     fi
 
-    progress "  runner starting... ${SECONDS}s (${st%%/*})"
+    progress "  github-runner-$RUN_ID: ${st:-unknown} (${SECONDS}s)"
     sleep 5
   done
 }
@@ -142,38 +319,59 @@ wait_for_ssh() {
       progress_done
       die "SSH never accepted us. Is the private key for the SSH secret at ~/.ssh/$REPO_NAME, loaded with ssh-add, or your default key?"
     fi
-    progress "  waiting for sshd... ${SECONDS}s"
+    progress "  sshd not answering on $RUNNER_IP (${SECONDS}s)"
     sleep 3
   done
   progress_done
   ok "SSH is up"
 }
 
-need gh        "Install: https://cli.github.com"
-need tailscale "Install: https://tailscale.com/download"
-need ssh       "Install an OpenSSH client."
-
-gh auth status >/dev/null 2>&1 || die "gh isn't logged in. Run: gh auth login"
-tailscale status >/dev/null 2>&1 || die "Tailscale isn't connected on this machine. Start it and sign in."
+need gh "Install: https://cli.github.com"
+gh auth status --active >/dev/null 2>&1 || die "gh isn't logged in. Run: gh auth login"
 
 REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)"
 [[ -n "$REPO" ]] || die "Couldn't work out the repo. Run this from inside a clone of it."
 REPO_NAME="${REPO#*/}"
+
+if [[ "$ACTION" == stop ]]; then
+  cmd_stop
+  exit
+fi
+
+need tailscale "Install: https://tailscale.com/download"
+need ssh       "Install an OpenSSH client."
+
+tailscale status >/dev/null 2>&1 || die "Tailscale isn't connected on this machine. Start it and sign in."
 
 SSH_KEY="$HOME/.ssh/$REPO_NAME"
 if [[ -f "$SSH_KEY" ]]; then
   SSH_OPTS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 fi
 
-RUN_ID="$(active_id || true)"
-if [[ -n "$RUN_ID" ]]; then
-  info "Reusing active run #$RUN_ID"
+if [[ "$ACTION" == push || "$ACTION" == pull ]]; then
+  cmd_share
+  exit
+fi
+
+load_active_runs
+if (( ${#IDS[@]} > 0 )); then
+  if [[ -t 0 ]]; then
+    run_menu "${#IDS[@]} active run(s) (up/down to move, enter to select, q to quit):" 1 1 || exit 0
+    if (( PICKED == 0 )); then
+      dispatch_run
+    else
+      RUN_ID="${IDS[PICKED-1]}"
+      info "Joining run #$RUN_ID"
+    fi
+  else
+    RUN_ID="${IDS[0]}"
+    info "Reusing active run #$RUN_ID"
+  fi
+else
+  dispatch_run
 fi
 
 trap on_interrupt INT
-if [[ -z "$RUN_ID" ]]; then
-  dispatch_run
-fi
 
 wait_for_runner
 wait_for_ssh
@@ -181,10 +379,12 @@ trap - INT
 
 GIT_NAME_LOCAL="$(git config --get user.name 2>/dev/null || true)"
 GIT_EMAIL_LOCAL="$(git config --get user.email 2>/dev/null || true)"
+LAPTOP_HOST="$(tailscale status --peers=false --json 2>/dev/null | sed -n 's/.*"DNSName":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 | sed 's/\.$//')"
+LAPTOP_USER="$(id -un)"
 
-REMOTE_CMD="GIT_NAME=$(printf '%q' "$GIT_NAME_LOCAL") GIT_EMAIL=$(printf '%q' "$GIT_EMAIL_LOCAL") exec bash ~/$(printf '%q' "$REPO_NAME")/container/doc.sh"
+REMOTE_CMD="GIT_NAME=$(printf '%q' "$GIT_NAME_LOCAL") GIT_EMAIL=$(printf '%q' "$GIT_EMAIL_LOCAL") LAPTOP_HOST=$(printf '%q' "$LAPTOP_HOST") LAPTOP_USER=$(printf '%q' "$LAPTOP_USER") exec bash ~/$(printf '%q' "$REPO_NAME")/container/doc.sh"
 
-info "Connecting and entering the dev container"
+info "Connecting and entering the Oir container"
 set +e
 ssh -t "${SSH_OPTS[@]}" "$SSH_USER@$RUNNER_IP" "$REMOTE_CMD"
 rc=$?

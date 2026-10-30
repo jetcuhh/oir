@@ -1,6 +1,6 @@
-name: UM
+name: Oir
 
-run-name: UM
+run-name: Oir
 
 on:
   workflow_dispatch:
@@ -9,12 +9,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: um
+  group: oir
   cancel-in-progress: false
 
 jobs:
-  vm:
-    name: dev box
+  Oir:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -97,6 +96,7 @@ jobs:
             "AllowUsers runner" \
             | sudo tee /etc/ssh/sshd_config.d/10-um.conf >/dev/null
 
+          sudo install -d -m 0755 /run/sshd
           sudo sshd -t
           sudo systemctl enable --now ssh
           sudo systemctl restart ssh
