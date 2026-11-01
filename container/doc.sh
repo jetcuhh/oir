@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-IMAGE_NAME="jetbrainsmono"
-CONTAINER_NAME="jetbrainsmono"
-START_DIR="/home/jetbrain/dev"
+IMAGE_NAME="jetcuhh"
+CONTAINER_NAME="jetcuhh"
+START_DIR="/home/jet/dev"
 LOCK_FILE="${TMPDIR:-/tmp}/mono.dev.lock"
 SHARE_DIR="$HOME/dev"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +44,12 @@ case "${1:-}" in
 esac
 
 build_image() {
-  docker build -t "$IMAGE_NAME" - <<'EOF'
+  # ~/dev is bind-mounted from the runner, so the container user must have the
+  # runner's uid or neither side can write the other's files (no chown needed).
+  local host_uid
+  host_uid="$(id -u)"
+  [ "$host_uid" -ne 0 ] || host_uid=1000
+  docker build -t "$IMAGE_NAME" --build-arg HOST_UID="$host_uid" - <<'EOF'
 FROM archlinux:latest
 
 RUN pacman -Syu --noconfirm && \
@@ -61,23 +66,26 @@ RUN setcap -r /usr/bin/sway
 
 RUN archlinux-java set java-25-openjdk
 
-RUN useradd -m -G wheel -s /usr/bin/fish jetbrain && \
-    echo "jetbrain ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jetbrain && \
-    chmod 440 /etc/sudoers.d/jetbrain
+ARG HOST_UID=1000
+RUN useradd -m -u "$HOST_UID" -G wheel -s /usr/bin/fish jet && \
+    echo "jet ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jet && \
+    chmod 440 /etc/sudoers.d/jet
 
-USER jetbrain
-WORKDIR /home/jetbrain
+USER jet
+WORKDIR /home/jet
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 
-ENV NPM_CONFIG_PREFIX="/home/jetbrain/.local"
-ENV PATH="/home/jetbrain/.opencode/bin:/home/jetbrain/.local/bin:/home/jetbrain/.cargo/bin:${PATH}"
+ENV NPM_CONFIG_PREFIX="/home/jet/.local"
+ENV PATH="/home/jet/.opencode/bin:/home/jet/.local/bin:/home/jet/.cargo/bin:${PATH}"
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent pnpm && \
     curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
 
-RUN mkdir -p /home/jetbrain/.config/fish && \
-    cat >> /home/jetbrain/.config/fish/config.fish <<'FISHEOF'
+RUN pi install npm:@maxpaulus/pi-cline
+
+RUN mkdir -p /home/jet/.config/fish && \
+    cat >> /home/jet/.config/fish/config.fish <<'FISHEOF'
 fish_config prompt choose arrow >/dev/null
 set -gx JAVA_HOME /usr/lib/jvm/default
 alias ls 'eza --color=always --icons=always --group-directories-first'
@@ -96,23 +104,23 @@ if status is-interactive
                 git config --global user.name >/dev/null; or git config --global user.name "$parts[3]"
                 git config --global user.email >/dev/null; or git config --global user.email "$parts[1]+$parts[2]@users.noreply.github.com"
             else
-                echo "jetbrain: couldn't fetch GitHub user (bad token?); git identity not fully set"
+                echo "jet: couldn't fetch GitHub user (bad token?); git identity not fully set"
             end
         end
     else
-        echo "jetbrain: no GITHUB_TOKEN in this shell; gh/git are unauthenticated"
+        echo "jet: no GITHUB_TOKEN in this shell; gh/git are unauthenticated"
     end
 end
 FISHEOF
 
-RUN mkdir -p /home/jetbrain/.config/nushell /home/jetbrain/.local/bin && \
-    cat >> /home/jetbrain/.config/nushell/env.nu <<'NUENVEOF'
+RUN mkdir -p /home/jet/.config/nushell /home/jet/.local/bin && \
+    cat >> /home/jet/.config/nushell/env.nu <<'NUENVEOF'
 
 $env.PATH = ($env.PATH | prepend $"($env.HOME)/.local/bin")
 $env.JAVA_HOME = "/usr/lib/jvm/default"
 NUENVEOF
 
-RUN cat >> /home/jetbrain/.config/nushell/config.nu <<'NUEOF'
+RUN cat >> /home/jet/.config/nushell/config.nu <<'NUEOF'
 
 alias ls = eza --color=always --icons=always --group-directories-first
 
@@ -138,8 +146,23 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN curl -fsSL https://x.ai/cli/install.sh | bash
 
-RUN mkdir -p /home/jetbrain/dev
-WORKDIR /home/jetbrain/dev
+# dpath: there is no TTY during a build, so name the shells explicitly instead
+# of letting the installer try to show its picker.
+RUN curl -fsSL https://raw.githubusercontent.com/jetcuhh/dpath/main/install.sh | sh -s -- both
+
+RUN curl -fsSL https://raw.githubusercontent.com/jetcuhh/lantern/main/install.sh | sh
+
+# oshi and flint: build from source, install into ~/.local/bin, delete the checkout.
+RUN git clone --depth 1 https://github.com/jetcuhh/oshi /tmp/oshi \
+    && make -C /tmp/oshi install \
+    && rm -rf /tmp/oshi
+
+RUN git clone --depth 1 https://github.com/jetcuhh/flint /tmp/flint \
+    && make -C /tmp/flint install \
+    && rm -rf /tmp/flint
+
+RUN mkdir -p /home/jet/dev
+WORKDIR /home/jet/dev
 
 CMD ["sleep", "infinity"]
 EOF
@@ -159,17 +182,17 @@ ensure_container() {
   if ! docker container inspect "$CONTAINER_NAME" &>/dev/null; then
     mkdir -p "$SHARE_DIR"
     docker run -d --name "$CONTAINER_NAME" \
-      --hostname mono \
+      --hostname fridge \
       --init \
       -p 127.0.0.1:5900:5900 \
-      -u jetbrain \
-      -v "$SHARE_DIR:/home/jetbrain/dev" \
+      -u jet \
+      -v "$SHARE_DIR:/home/jet/dev" \
       "$IMAGE_NAME" >/dev/null
     echo "Created container '$CONTAINER_NAME'"
   else
     echo "Resuming existing container '$CONTAINER_NAME' (use --reset for a fresh one)"
     if ! docker inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' "$CONTAINER_NAME" 2>/dev/null \
-         | grep -q '/home/jetbrain/dev'; then
+         | grep -q '/home/jet/dev'; then
       echo "WARNING: this container predates the ~/dev share mount; run --reset to recreate it." >&2
     fi
   fi
@@ -180,11 +203,11 @@ ensure_container() {
   # Browser runs as a detached wlroots session; safe to call on every start.
   if [ "${BROWSER:-1}" != "0" ] && [ -f "$HERE/browser.sh" ]; then
     docker cp "$HERE/browser.sh" \
-      "$CONTAINER_NAME:/home/jetbrain/.local/bin/wayland-browser" >/dev/null 2>&1 || true
-    docker exec -u jetbrain "$CONTAINER_NAME" \
-      chmod +x /home/jetbrain/.local/bin/wayland-browser >/dev/null 2>&1 || true
-    docker exec -u jetbrain -e VNC_PORT="${VNC_PORT:-5900}" -e RES="${RES:-1440x900}" \
-      "$CONTAINER_NAME" /home/jetbrain/.local/bin/wayland-browser start \
+      "$CONTAINER_NAME:/home/jet/.local/bin/wayland-browser" >/dev/null 2>&1 || true
+    docker exec -u jet "$CONTAINER_NAME" \
+      chmod +x /home/jet/.local/bin/wayland-browser >/dev/null 2>&1 || true
+    docker exec -u jet -e VNC_PORT="${VNC_PORT:-5900}" -e RES="${RES:-1440x900}" \
+      "$CONTAINER_NAME" /home/jet/.local/bin/wayland-browser start \
       >/dev/null 2>&1 || true
   fi
 
@@ -203,7 +226,7 @@ fi
 if [ -z "${GITHUB_TOKEN:-}" ]; then
   echo "WARNING: no TOKEN / GITHUB_TOKEN in this shell and no ~/.token file; gh/git will be unauthenticated." >&2
 else
-  echo "GitHub token found (${#GITHUB_TOKEN} chars), passing it into the shell."
+  echo "GitHub token found, passing it into the shell."
 fi
 
 export GIT_NAME="${GIT_NAME:-}"
@@ -214,13 +237,13 @@ export LAPTOP_USER="${LAPTOP_USER:-}"
 ensure_container
 
 # Tell the agent inside the container where the laptop is and how to move files.
-printf 'laptop: %s (user %s)\nshare: /home/jetbrain/dev  <- mounted from ~/dev on the runner\nlaptop -> container: ./connect.sh push <path>   (run on the laptop)\ncontainer -> laptop: ./connect.sh pull <name>   (run on the laptop)\n' \
+printf 'laptop: %s (user %s)\nshare: /home/jet/dev  <- mounted from ~/dev on the runner\nlaptop -> container: ./connect.sh push <path>   (run on the laptop)\ncontainer -> laptop: ./connect.sh pull <name>   (run on the laptop)\n' \
   "${LAPTOP_HOST:-unknown}" "${LAPTOP_USER:-unknown}" \
-  | docker exec -i -u jetbrain "$CONTAINER_NAME" sh -c 'cat > /home/jetbrain/LAPTOP' 2>/dev/null || true
+  | docker exec -i -u jet "$CONTAINER_NAME" sh -c 'cat > /home/jet/LAPTOP' 2>/dev/null || true
 
 # Point git at gh's credential helper for every shell, not just interactive fish.
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  docker exec -u jetbrain -e GITHUB_TOKEN -e GH_TOKEN "$CONTAINER_NAME" \
+  docker exec -u jet -e GITHUB_TOKEN -e GH_TOKEN "$CONTAINER_NAME" \
     gh auth setup-git --hostname github.com >/dev/null 2>&1 || true
 fi
 
@@ -235,7 +258,7 @@ if [ -t 0 ] && [ -t 1 ]; then
 fi
 
 exec docker exec "${TTY_FLAGS[@]}" \
-  -u jetbrain \
+  -u jet \
   -w "$START_DIR" \
   -e GITHUB_TOKEN \
   -e GIT_NAME \

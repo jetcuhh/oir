@@ -8,7 +8,7 @@ laptop  ──scp──▶  runner:~/dev  ──bind mount──▶  container:~
 laptop  ◀─scp──   runner:~/dev  ◀─bind mount──   container:~/dev
 ```
 
-The runner's `~/dev` is mounted at `/home/jetbrain/dev` in the container, so
+The runner's `~/dev` is mounted at `/home/jet/dev` in the container, so
 anything written on either side is immediately visible on the other. No sync
 daemon, no extra service, nothing to start.
 
@@ -48,7 +48,7 @@ it's always *this* laptop.
 
 ## Notes for agents
 
-- Shared directory: `/home/jetbrain/dev` (same as `~/dev`).
+- Shared directory: `/home/jet/dev` (same as `~/dev`).
 - Put files meant for the human in `~/dev`; do not assume any other path is
   visible outside the container.
 - There is no outbound connection to the laptop from inside the container. The
@@ -61,6 +61,11 @@ it's always *this* laptop.
 
 - The runner's `~/dev` is created by the workflow's prebuild step, so it exists
   before you connect.
+- The container user `jet` is created with the runner's uid, so files in `~/dev`
+  are owned by the same user on both sides and nothing needs a `chown`. An image
+  built before that change has `jet` as uid 1000 and the mount looks read-only;
+  until you rebuild, `sudo chmod -R a+rwX ~/dev` on the runner makes both sides
+  writable.
 - A container created before this mount existed will warn on attach; run
   `container/doc.sh --reset` (or `--rebuild`) to recreate it with the mount.
 - Both commands use the same SSH key as the normal connection

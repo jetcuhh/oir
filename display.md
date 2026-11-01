@@ -22,9 +22,9 @@ laptop  ──Tailscale (DERP relay, ~267 ms RTT)──  runner host  ──dock
 
 - **SSH lands on the runner host**, not in the container. `localhost` in an SSH
   command is the *host*, not the container.
-- The GUI lives in the **container `jetbrainsmono`** (`172.17.0.2` right now —
+- The GUI lives in the **container `jetcuhh`** (`172.17.0.2` right now —
   resolve it every run, see §2.1).
-- Inside the container: `XDG_RUNTIME_DIR=/tmp/xdg-1000`, `WAYLAND_DISPLAY=wayland-1`,
+- Inside the container: `XDG_RUNTIME_DIR=/tmp/xdg-$(id -u)`, `WAYLAND_DISPLAY=wayland-1`,
   output `HEADLESS-1`, RFB on `0.0.0.0:5900`.
 - `sway` runs on the **wlroots headless backend** with `WLR_RENDERER=pixman`;
   there is no `/dev/dri`, no GPU, no X11, no Xwayland. Software GL only (llvmpipe).
@@ -67,7 +67,7 @@ Violating any of these loses the user's data, breaks the display, or wastes an
 hour of the user's time.
 
 1. **Never run `doc.sh --reset` or `--rebuild`.** The container holds
-   `/home/jetbrain/dev` (the user's projects: `echo`, `echo-linux-port`). `--reset`
+   `/home/jet/dev` (the user's projects: `echo`, `echo-linux-port`). `--reset`
    deletes it with no recovery. If something is broken, fix the process, not the
    container.
 2. **No X11, ever.** Do not install `tigervnc-server`, `x11vnc`, `xvfb`,
@@ -130,7 +130,7 @@ echo "runner: $RUNNER_IP"
 
 # container: only the runner host owns docker, so ask it
 CIP=$($SSH runner@"$RUNNER_IP" \
-        "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jetbrainsmono")
+        "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jetcuhh")
 echo "container: $CIP"
 ```
 
@@ -188,7 +188,7 @@ SSH="ssh -i $KEY -o IdentitiesOnly=yes \
 RUNNER_IP=$(tailscale status --json \
   | jq -r '[.Peer[] | select(.HostName|startswith("github-runner-")) | select(.Online) | .TailscaleIPs[0]][0] // empty')
 CIP=$($SSH runner@"$RUNNER_IP" \
-        "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jetbrainsmono")
+        "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jetcuhh")
 
 $SSH -N -L 5900:"$CIP":5900 runner@"$RUNNER_IP" &
 TUNNEL=$!
@@ -226,21 +226,21 @@ Its environment knobs: `RES` (default `1440x900`), `VNC_PORT` (5900),
 > **Known drift:** the deployed `~/.local/bin/wayland-browser` is stale relative
 > to `container/browser.sh` (missing the `-f $VNC_MAX_FPS -p -L info` flags).
 > `doc.sh` re-copies it on every container start. If you need the new flags
-> *now*, `docker cp container/browser.sh jetbrainsmono:/home/jetbrain/.local/bin/wayland-browser`.
+> *now*, `docker cp container/browser.sh jetcuhh:/home/jet/.local/bin/wayland-browser`.
 
 ### The env prelude
 
 Any direct interaction with the compositor needs this. From inside the container:
 
 ```bash
-export XDG_RUNTIME_DIR=/tmp/xdg-1000 WAYLAND_DISPLAY=wayland-1
+export XDG_RUNTIME_DIR=/tmp/xdg-$(id -u) WAYLAND_DISPLAY=wayland-1
 ```
 
 From the laptop, the full form:
 
 ```bash
-ssh runner@<tailscale-ip> 'docker exec -u jetbrain jetbrainsmono bash -lc "
-  export XDG_RUNTIME_DIR=/tmp/xdg-1000 WAYLAND_DISPLAY=wayland-1
+ssh runner@<tailscale-ip> 'docker exec -u jet jetcuhh bash -lc "
+  export XDG_RUNTIME_DIR=/tmp/xdg-$(id -u) WAYLAND_DISPLAY=wayland-1
   <command> "'
 ```
 
@@ -260,7 +260,7 @@ way to answer "did it actually launch?" — far better than guessing from logs.
 Check what is on screen and which window has focus:
 
 ```bash
-swaymsg -s /tmp/xdg-1000/sway-ipc.1000.*.sock -t get_tree \
+swaymsg -s /tmp/xdg-$(id -u)/sway-ipc.*.sock -t get_tree \
   | python3 -c 'import json,sys
 d=json.load(sys.stdin)
 def w(n):
@@ -299,7 +299,7 @@ curl -sS "$(curl -sS https://piston-meta.mojang.com/mc/game/version_manifest_v2.
 Launch (adjust Java to what the version's metadata demands):
 
 ```bash
-export XDG_RUNTIME_DIR=/tmp/xdg-1000 WAYLAND_DISPLAY=wayland-1
+export XDG_RUNTIME_DIR=/tmp/xdg-$(id -u) WAYLAND_DISPLAY=wayland-1
 setsid nohup portablemc start -u Steve \
   --jvm /usr/lib/jvm/java-25-openjdk/bin/java \
   --resolution 960x540 26.3 >/tmp/mc263.log 2>&1 </dev/null &
@@ -363,7 +363,7 @@ Measured on this box (2026-10-20, Minecraft fullscreen at 1440×900):
 2. **Cut pixels.** ~30 % fewer pixels removes ~30 % of the work from llvmpipe,
    sway's compositor, wayvnc's encoder *and* the wire simultaneously:
    ```bash
-   swaymsg -s /tmp/xdg-1000/sway-ipc.1000.*.sock output HEADLESS-1 resolution 1280x720
+   swaymsg -s /tmp/xdg-$(id -u)/sway-ipc.*.sock output HEADLESS-1 resolution 1280x720
    ```
    Reversible: `resolution 1440x900`.
 3. **Match the frame rate to the stream.** A 45 fps source delivered through a
@@ -407,11 +407,11 @@ ss -lnt | grep 5900
 
 # 2. right tunnel target? ($SSH from §2.1)
 CIP=$($SSH runner@"$RUNNER_IP" \
-        "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jetbrainsmono")
+        "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jetcuhh")
 echo "$CIP"
 
 # 3. who is connected right now?
-wayvncctl client-list          # -S /tmp/xdg-1000/wayvncctl if it complains
+wayvncctl client-list          # -S /tmp/xdg-$(id -u)/wayvncctl if it complains
 ```
 
 Order of checks: wayvnc listening → `$CIP` is the container, not the host → the
@@ -430,7 +430,7 @@ wayvncctl client-disconnect <id>
 ### 3.6 "Change the resolution"
 
 ```bash
-swaymsg -s /tmp/xdg-1000/sway-ipc.1000.*.sock output HEADLESS-1 resolution 1280x720
+swaymsg -s /tmp/xdg-$(id -u)/sway-ipc.*.sock output HEADLESS-1 resolution 1280x720
 ```
 
 Live, no restart, no session loss. Fullscreen apps resize themselves. For a
@@ -566,11 +566,11 @@ command output. Match that.
 ## 8. Thirty-second triage
 
 ```bash
-export XDG_RUNTIME_DIR=/tmp/xdg-1000 WAYLAND_DISPLAY=wayland-1
+export XDG_RUNTIME_DIR=/tmp/xdg-$(id -u) WAYLAND_DISPLAY=wayland-1
 ps -eo pid,stat,comm | awk '$2 !~ /^Z/ && $3 ~ /^(sway|wayvnc|chromium|java)$/'
 ss -lnt | grep 5900
 grep -E 'MIN-RTT|Frames captured' /tmp/wayland-remote/wayvnc.log | tail -3
-swaymsg -s /tmp/xdg-1000/sway-ipc.1000.*.sock -t get_outputs | head -20
+swaymsg -s /tmp/xdg-$(id -u)/sway-ipc.*.sock -t get_outputs | head -20
 grim /tmp/wayland-remote/shot.png && echo ok
 ```
 
