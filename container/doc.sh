@@ -265,4 +265,4 @@ exec docker exec "${TTY_FLAGS[@]}" \
   -e GIT_EMAIL \
   -e LAPTOP_HOST \
   -e LAPTOP_USER \
-  "$CONTAINER_NAME" fish lantern
+  "$CONTAINER_NAME" fish 
