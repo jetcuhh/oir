@@ -37,7 +37,7 @@ ls ~/dev                                  # anything pushed by the laptop
 The container also knows which laptop it belongs to:
 
 ```sh
-cat ~/LAPTOP          # laptop hostname + user + how to move files
+cat ~/.agents/LAPTOP  # laptop hostname + user + how to move files
 echo $LAPTOP_HOST     # e.g. fridge.tailXXXX.ts.net
 echo $LAPTOP_USER
 ```

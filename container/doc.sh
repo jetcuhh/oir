@@ -57,7 +57,7 @@ RUN pacman -Syu --noconfirm && \
         nodejs npm \
         jdk21-openjdk jdk25-openjdk \
         sway wayvnc grim chromium mesa libglvnd wl-clipboard swaybg ttf-dejavu \
-        procps-ng libcap && \
+        procps-ng  chafa libcap && \
     pacman -Scc --noconfirm
 
 # sway ships with cap_sys_nice=ep; Docker's capability bounding set rejects that
@@ -236,10 +236,20 @@ export LAPTOP_USER="${LAPTOP_USER:-}"
 
 ensure_container
 
+docker exec -u jet "$CONTAINER_NAME" mkdir -p /home/jet/.agents >/dev/null 2>&1 || true
+docker exec -u jet "$CONTAINER_NAME" rm -f /home/jet/LAPTOP >/dev/null 2>&1 || true
+
 # Tell the agent inside the container where the laptop is and how to move files.
 printf 'laptop: %s (user %s)\nshare: /home/jet/dev  <- mounted from ~/dev on the runner\nlaptop -> container: ./connect.sh push <path>   (run on the laptop)\ncontainer -> laptop: ./connect.sh pull <name>   (run on the laptop)\n' \
   "${LAPTOP_HOST:-unknown}" "${LAPTOP_USER:-unknown}" \
-  | docker exec -i -u jet "$CONTAINER_NAME" sh -c 'cat > /home/jet/LAPTOP' 2>/dev/null || true
+  | docker exec -i -u jet "$CONTAINER_NAME" sh -c 'cat > /home/jet/.agents/LAPTOP' 2>/dev/null || true
+
+for md in "$HERE"/../*.md; do
+  [ -f "$md" ] || continue
+  docker exec -i -u jet "$CONTAINER_NAME" \
+    sh -c 'cat > "/home/jet/.agents/$1"' _ "$(basename "$md")" \
+    < "$md" >/dev/null 2>&1 || true
+done
 
 # Point git at gh's credential helper for every shell, not just interactive fish.
 if [ -n "${GITHUB_TOKEN:-}" ]; then
