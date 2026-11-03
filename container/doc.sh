@@ -57,7 +57,7 @@ RUN pacman -Syu --noconfirm && \
         nodejs npm \
         jdk21-openjdk jdk25-openjdk \
         sway wayvnc grim chromium mesa libglvnd wl-clipboard swaybg ttf-dejavu \
-        procps-ng  chafa libcap && \
+        procps-ng croc  chafa libcap && \
     pacman -Scc --noconfirm
 
 # sway ships with cap_sys_nice=ep; Docker's capability bounding set rejects that
