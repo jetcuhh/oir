@@ -79,7 +79,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 ENV NPM_CONFIG_PREFIX="/home/jet/.local"
 ENV PATH="/home/jet/.opencode/bin:/home/jet/.local/bin:/home/jet/.cargo/bin:${PATH}"
 
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent pnpm && \
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent freebuff  pnpm && \
     curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
 
 RUN pi install npm:@maxpaulus/pi-cline
