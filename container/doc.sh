@@ -53,7 +53,7 @@ build_image() {
 FROM archlinux:latest
 
 RUN pacman -Syu --noconfirm && \
-    pacman -S --noconfirm base-devel git gcc fish nushell eza sudo curl github-cli ouch \
+    pacman -S --noconfirm base-devel git gcc fish nushell eza sudo curl github-cli ouch zip \
         nodejs npm \
         jdk21-openjdk jdk25-openjdk \
         sway wayvnc grim chromium mesa libglvnd wl-clipboard swaybg ttf-dejavu \
