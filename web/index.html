@@ -234,6 +234,8 @@ async function addTab({ id, name, alive }) {
 
   const term = new WTerm(el, { core: await GhosttyCore.load(), scrollbackLines: 5000, cursorBlink: false });
   await term.init();
+  // wterm hands Tab to the page after Esc (an accessibility exit); TUIs and vim need that Tab.
+  el.addEventListener('keydown', (e) => { if (e.key === 'Tab' && term.input) term.input.tabExitArmed = false; }, true);
 
   const t = { id, name, base: name, fresh: alive === false, hint: false, el, term, ws: null, ended: false, retry: 0, timer: 0, status: '',
               unread: false, armed: false, closing: false, quietUntil: 0, wbuf: [], wsize: 0, wraf: 0 };
