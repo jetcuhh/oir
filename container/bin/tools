@@ -6,6 +6,7 @@ wr FILE <<'X'     stdin becomes the file
 gl 'GLOB' [dir]   find files (100 max)
 rg PATTERN [path] search (ripgrep)
 handoff [add T]   resume notes + last commands
+swayrun APP [A..] launch an app inside sway
 Max 90s per call: for long jobs use `nohup CMD >/tmp/out/x.log 2>&1 &` then `tail`.
 Success prints "." Long output is cut; the full log is in /tmp/out/.
 T

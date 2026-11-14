@@ -233,7 +233,7 @@ ensure_container() {
   if [ -d "$HERE/bin" ]; then
     docker exec -u jet "$CONTAINER_NAME" mkdir -p /home/jet/.config /home/jet/.local/bin >/dev/null 2>&1 || true
     docker cp "$HERE/bin/ripgreprc" "$CONTAINER_NAME:/home/jet/.config/ripgreprc" >/dev/null 2>&1 || true
-    for f in rd edit wr gl tools handoff commit-msg; do
+    for f in rd edit wr gl tools handoff commit-msg swayrun; do
       docker cp "$HERE/bin/$f" "$CONTAINER_NAME:/home/jet/.local/bin/$f" >/dev/null 2>&1 || true
     done
     # Git: strip AI attribution from commits, and set an identity so commits work everywhere.
