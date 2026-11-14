@@ -60,6 +60,12 @@ RUN pacman -Syu --noconfirm && \
         procps-ng croc  chafa libcap ripgrep fd && \
     pacman -Scc --noconfirm
 
+# Zig is pinned: unn needs 0.17.0 and the Arch package lags.
+ARG ZIG_VERSION=0.17.0
+RUN z="zig-$(uname -m)-linux-$ZIG_VERSION" && \
+    curl --proto '=https' --tlsv1.2 -fsSL "https://ziglang.org/download/$ZIG_VERSION/$z.tar.xz" | tar -xJ -C /opt && \
+    ln -s "/opt/$z/zig" /usr/local/bin/zig
+
 # sway ships with cap_sys_nice=ep; Docker's capability bounding set rejects that
 # at execve ("Operation not permitted"), so drop it. sway runs fine without it.
 RUN setcap -r /usr/bin/sway
