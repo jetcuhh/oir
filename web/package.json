@@ -1,0 +1,8 @@
+{
+  "name": "oir-web",
+  "private": true,
+  "description": "Browser front end for the Oir runner shell (ghostty-web).",
+  "dependencies": {
+    "ghostty-web": "^0.4.0"
+  }
+}

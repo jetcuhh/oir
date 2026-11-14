@@ -1,0 +1,26 @@
+#!/usr/bin/env node
+// edit FILE <<'X'
+// old text
+// =====
+// new text
+// X
+// Exactly one match is replaced. Empty old writes new as the whole file. Prints "." on success.
+const fs = require("fs"), path = require("path");
+const file = process.argv[2];
+if (!file) { console.log("usage: edit FILE < 'old\\n=====\\nnew'"); process.exit(1); }
+let input = fs.readFileSync(0, "utf8").replace(/\n$/, "");
+const i = input.search(/(^|\n)=====(\n|$)/);
+if (i < 0) { console.log("missing ===== separator"); process.exit(1); }
+const sep = input.slice(i).match(/^\n?=====\n?/)[0];
+const oldT = input.slice(0, i), newT = input.slice(i + sep.length);
+if (oldT === "") {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, newT + "\n");
+} else {
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); } catch { console.log("not found: " + file); process.exit(1); }
+  const n = text.split(oldT).length - 1;
+  if (n !== 1) { console.log(n + " matches, need 1"); process.exit(1); }
+  fs.writeFileSync(file, text.replace(oldT, () => newT));
+}
+console.log(".");

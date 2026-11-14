@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# gl PATTERN [dir]  files matching a glob (e.g. '*.py'), max 100
+out="$(fd -g "$1" "${2:-.}" 2>&1)"; n="$(printf '%s' "$out" | grep -c .)"
+printf '%s\n' "$out" | head -n 100; (( n > 100 )) && echo "[$((n-100)) more]"; true

@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#101318">
+<title>Oir</title>
+<!-- blank favicon -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E">
+<style>
+  @font-face { font-family: "JBM NF"; font-weight: 400; font-style: normal; font-display: block;
+    src: url(/fonts/JetBrainsMonoNerdFontMono-Regular.woff2) format("woff2"); }
+  @font-face { font-family: "JBM NF"; font-weight: 700; font-style: normal; font-display: block;
+    src: url(/fonts/JetBrainsMonoNerdFontMono-Bold.woff2) format("woff2"); }
+  @font-face { font-family: "JBM NF"; font-weight: 400; font-style: italic; font-display: block;
+    src: url(/fonts/JetBrainsMonoNerdFontMono-Italic.woff2) format("woff2"); }
+  @font-face { font-family: "JBM NF"; font-weight: 700; font-style: italic; font-display: block;
+    src: url(/fonts/JetBrainsMonoNerdFontMono-BoldItalic.woff2) format("woff2"); }
+
+  :root {
+    --bg: #101318; --fg: #EAEFF5; --panel: #161a22; --line: #222733;
+    --dim: #98A0AE; --accent: #E37B66; --accent-hi: #F09A88; --err: #F09A88;
+    --mono: "JBM NF", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 13px/1.4 var(--mono); overflow: hidden; scrollbar-width: none; }
+  ::-webkit-scrollbar { display: none; }
+  [hidden] { display: none !important; }
+
+  /* ---- login: every control is custom drawn, nothing uses browser defaults ---- */
+  #login { position: fixed; inset: 0; display: grid; place-items: center; }
+  .card { width: min(340px, 86vw); display: grid; gap: 14px; }
+  .brand { color: var(--dim); letter-spacing: .35em; text-transform: uppercase; font-size: 11px; }
+  .field { position: relative; border-bottom: 1px solid var(--line); transition: border-color .15s; }
+  .field:focus-within { border-color: var(--accent); }
+  .field input { all: unset; display: block; width: 100%; padding: 10px 0; color: var(--fg);
+    font: inherit; letter-spacing: .08em; caret-color: var(--accent); }
+  .field input::placeholder { color: #4b5363; letter-spacing: .02em; }
+  .hint { color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; min-height: 1.4em; }
+  .hint .err { color: var(--err); }
+  .hint { align-items: center; }
+  #go { all: unset; cursor: pointer; color: var(--dim); font-size: 11px; letter-spacing: .08em;
+    transition: color .15s; }
+  #go:hover, #go:focus-visible { color: var(--fg); }
+  #go:active { color: var(--accent-hi); }
+  #go:disabled { cursor: default; opacity: .5; color: var(--dim); }
+  #go.ready { color: var(--accent); }
+
+  /* ---- app: tab bar + one pane per tab ---- */
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  #bar { flex: none; height: 32px; display: flex; border-bottom: 1px solid var(--line);
+    font-size: 12px; user-select: none; }
+  #tabs { flex: 1; min-width: 0; display: flex; align-items: stretch; overflow-x: auto; }
+  .tab { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 14px;
+    color: var(--dim); cursor: pointer; white-space: nowrap; transition: color .15s; }
+  .tab:hover { color: var(--fg); }
+  .tab.active { color: var(--fg); box-shadow: inset 0 -1px 0 var(--accent); }
+  .tab .dot { margin: 0; }
+  .tab .x { all: unset; cursor: pointer; min-width: 14px; padding: 0 2px; text-align: center; opacity: 0; }
+  .tab:hover .x, .tab.active .x { opacity: .6; }
+  .tab .x:hover { opacity: 1; color: var(--accent-hi); }
+  .tab .x.arm { opacity: 1; color: var(--accent); }
+  #add { all: unset; cursor: pointer; padding: 0 14px; display: flex; align-items: center;
+    color: var(--dim); font-size: 16px; transition: color .15s; }
+  #add:hover { color: var(--fg); }
+  #run { flex: none; display: flex; align-items: center; gap: 14px; padding: 0 14px;
+    color: var(--dim); font-size: 11px; white-space: nowrap; }
+  #run.low #left { color: var(--accent); }
+  #stop { all: unset; cursor: pointer; transition: color .15s; }
+  #stop:hover { color: var(--err); }
+  #stop.arm { color: var(--accent); }
+  #panes { position: relative; flex: 1; min-height: 0; }
+  /* hidden panes keep their size (visibility, not display) so the terminal stays fitted */
+  .pane { position: absolute; inset: 0; visibility: hidden; }
+  .pane.active { visibility: visible; }
+  /* one cursor only: the terminal's own block. The hidden textarea's caret and the
+     mouse pointer are suppressed while you type; moving the mouse brings the pointer back. */
+  .pane textarea { caret-color: transparent; }
+  body.typing, body.typing * { cursor: none !important; }
+
+  /* ---- corner controls, only visible when you reach for them ---- */
+  #corner { position: fixed; right: 10px; bottom: 8px; display: flex; gap: 10px; align-items: center;
+    font-size: 11px; color: var(--dim); opacity: 0; transition: opacity .2s; user-select: none; }
+  body:hover #corner, #corner.show { opacity: .9; }
+  #corner button { all: unset; cursor: pointer; padding: 3px 8px; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--panel); color: var(--dim); }
+  #corner button:hover { color: var(--fg); border-color: var(--accent); }
+  #corner button.on { color: var(--accent); border-color: var(--accent); }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    margin-right: 6px; vertical-align: 1px; }
+</style>
+</head>
+<body>
+
+<div id="login" hidden>
+  <form id="form" class="card" autocomplete="off">
+    <div class="brand">oir</div>
+    <div class="field"><input id="pw" type="password" placeholder="password" autocomplete="new-password" spellcheck="false" autocapitalize="off" autofocus></div>
+    <div class="hint"><span id="err" class="err"></span><button id="go" type="submit">enter &#8629;</button></div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <div id="bar">
+    <div id="tabs"></div>
+    <div id="run" hidden><span id="left"></span><button id="stop" type="button" title="Stop the GitHub workflow (shuts everything down)">stop</button></div>
+  </div>
+  <div id="panes"></div>
+</div>
+
+<div id="corner">
+  <span id="status"></span>
+  <button id="capture" type="button" title="Fullscreen + keyboard lock, so Ctrl+W / Ctrl+T / Ctrl+N reach the terminal">capture keys</button>
+</div>
+
+<script type="module">
+import { init, Terminal, FitAddon } from '/static/ghostty-web.js';
+
+const $ = (id) => document.getElementById(id);
+const enc = new TextEncoder();
+const FONT = '"JBM NF", ui-monospace, Menlo, Consolas, monospace';
+
+const THEME = {
+  background: '#101318', foreground: '#EAEFF5',
+  cursor: '#E37B66', cursorAccent: '#101318',
+  selectionBackground: '#2c3342',
+  black: '#222733',        red: '#E37B66',        green: '#8DA882',      yellow: '#E0A568',
+  blue: '#8999AA',         magenta: '#A58AA8',    cyan: '#809D9E',       white: '#C6CED8',
+  brightBlack: '#98A0AE',  brightRed: '#F09A88',  brightGreen: '#A9C29F', brightYellow: '#EBBE8A',
+  brightBlue: '#A5B3C2',   brightMagenta: '#BFA6C2', brightCyan: '#9DB8B9', brightWhite: '#EAEFF5',
+};
+
+const tabs = new Map();      // id -> tab {id, name, el, term, fit, ws, ...}
+let active = null;
+let booted = null;
+
+const setStatus = (html) => {
+  $('status').innerHTML = html;
+  $('corner').classList.toggle('show', !!html);
+};
+
+async function api(path, method = 'GET') {
+  const res = await fetch(path, { method, cache: 'no-store' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(body.error || res.statusText), { status: res.status });
+  return body;
+}
+
+async function authed() {
+  try { return (await (await fetch('/api/me', { cache: 'no-store' })).json()).ok; }
+  catch { return false; }
+}
+
+function showLogin(msg = '') {
+  $('app').hidden = true;
+  $('login').hidden = false;
+  $('err').textContent = msg;
+  $('pw').focus();
+}
+
+// The fonts are large; wait for them (briefly) so the terminal measures real cell sizes.
+async function loadFonts() {
+  const faces = ['400 16px "JBM NF"', '700 16px "JBM NF"', 'italic 400 16px "JBM NF"', 'italic 700 16px "JBM NF"'];
+  try {
+    await Promise.race([
+      Promise.all(faces.map((f) => document.fonts.load(f, 'A'))),
+      new Promise((r) => setTimeout(r, 6000)),
+    ]);
+  } catch { /* fall back to the system monospace */ }
+}
+
+function ready() {
+  if (!booted) booted = Promise.all([init(), loadFonts()]);
+  return booted;
+}
+
+/* ---- tab bar ---- */
+function renderTabs() {
+  const bar = $('tabs');
+  bar.textContent = '';
+  for (const t of tabs.values()) {
+    const d = document.createElement('div');
+    d.className = 'tab' + (t.id === active ? ' active' : '');
+    d.dataset.id = t.id;
+    if (t.unread && t.id !== active) {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      d.append(dot);
+    }
+    const n = document.createElement('span');
+    n.textContent = t.name;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'x' + (t.armed ? ' arm' : '');
+    x.textContent = t.armed ? 'close?' : '\u00d7';
+    x.title = 'close tab';
+    d.append(n, x);
+    bar.append(d);
+  }
+  const add = document.createElement('button');
+  add.id = 'add';
+  add.type = 'button';
+  add.title = 'new tab';
+  add.textContent = '+';
+  bar.append(add);
+}
+
+function activate(id) {
+  const t = tabs.get(id);
+  if (!t) return;
+  active = id;
+  t.unread = false;
+  for (const x of tabs.values()) x.el.classList.toggle('active', x === t);
+  renderTabs();
+  setStatus(t.status || '');
+  try { localStorage.setItem('oir.tab', id); } catch { /* storage may be off */ }
+  requestAnimationFrame(() => { try { t.fit.fit(); } catch {} t.term.focus(); });
+}
+
+function focusActive() {
+  const t = tabs.get(active);
+  if (t) t.term.focus();
+}
+
+/* ---- one terminal + websocket per tab ---- */
+async function addTab({ id, name, alive }) {
+  await ready();
+  const el = document.createElement('div');
+  el.className = 'pane';
+  $('panes').append(el);
+
+  const term = new Terminal({
+    fontSize: 16,
+    fontFamily: FONT,
+    cursorStyle: 'block',
+    cursorBlink: false,
+    theme: THEME,
+    scrollback: 5000,
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(el);
+  fit.fit();
+  fit.observeResize();
+
+  const t = { id, name, base: name, fresh: alive === false, hint: false, el, term, fit, ws: null, ended: false, retry: 0, timer: 0, status: '',
+              unread: false, armed: false, closing: false, quietUntil: 0, wbuf: [], wsize: 0, wraf: 0 };
+  tabs.set(id, t);
+
+  term.onData((d) => {
+    if (!t.ws || t.ws.readyState !== WebSocket.OPEN) return;
+    if (t.ended) { t.ended = false; sendResize(t); return; }   // any key starts a new shell
+    t.ws.send(enc.encode(d));
+  });
+  term.onResize(() => sendResize(t));
+  renderTabs();
+  connect(t);
+  return t;
+}
+
+async function newTab() {
+  try {
+    const m = await api('/api/tabs', 'POST');
+    await addTab(m);
+    activate(m.id);
+  } catch (e) {
+    if (e.status === 401) { showLogin('session expired'); return; }
+    setStatus(e.message || 'could not open a tab');
+    setTimeout(() => setStatus((tabs.get(active) || {}).status || ''), 2500);
+  }
+}
+
+// Remove a tab from this page only (the server side is already gone, or about to be).
+function dropTab(id) {
+  const t = tabs.get(id);
+  if (!t) return;
+  const ids = [...tabs.keys()];
+  const i = ids.indexOf(id);
+  const next = ids[i + 1] ?? ids[i - 1];
+  t.closing = true;
+  clearTimeout(t.timer);
+  if (t.wraf) cancelAnimationFrame(t.wraf);
+  try { t.ws && t.ws.close(); } catch {}
+  try { t.term.dispose(); } catch {}
+  t.el.remove();
+  tabs.delete(id);
+  if (!tabs.size) { active = null; newTab(); return; }
+  if (active === id) activate(next); else renderTabs();
+}
+
+async function closeTab(id) {
+  try { await api('/api/tabs/' + id, 'DELETE'); }
+  catch (e) { if (e.status === 401) { showLogin('session expired'); return; } }
+  dropTab(id);
+}
+
+$('tabs').addEventListener('click', (e) => {
+  if (e.target.closest('#add')) { newTab(); return; }
+  const el = e.target.closest('.tab');
+  const t = el && tabs.get(el.dataset.id);
+  if (!t) return;
+  if (!e.target.closest('.x')) { activate(t.id); return; }
+  // two-step close, so a stray click can't kill a running job
+  if (t.armed || t.ended) { closeTab(t.id); return; }
+  t.armed = true;
+  renderTabs();
+  setTimeout(() => { t.armed = false; if (tabs.has(t.id)) renderTabs(); }, 2500);
+});
+
+/* ---- time left in the run, and a way to stop the workflow ---- */
+let run = { left: null, at: 0, stoppable: false };
+let stopArmed = false, stopping = false;
+
+function fmtLeft(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), r = sec % 60;
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m >= 5) return `${m}m`;
+  return `${m}m ${String(r).padStart(2, '0')}s`;
+}
+function paintRun() {
+  const box = $('run');
+  if (run.left == null) { box.hidden = true; return; }
+  box.hidden = false;
+  const left = Math.max(0, run.left - Math.round((Date.now() - run.at) / 1000));
+  $('left').textContent = stopping ? 'stopping\u2026' : `${fmtLeft(left)} left`;
+  box.classList.toggle('low', left < 600);
+  $('stop').hidden = !run.stoppable || stopping;
+  $('stop').classList.toggle('arm', stopArmed);
+  $('stop').textContent = stopArmed ? 'stop workflow?' : 'stop';
+}
+async function syncRun() {
+  try { const r = await api('/api/run'); run = { left: r.left, at: Date.now(), stoppable: r.stoppable }; }
+  catch { /* keep counting from the last sync */ }
+  paintRun();
+}
+setInterval(() => { if (!$('app').hidden) paintRun(); }, 1000);
+setInterval(() => { if (!$('app').hidden && !stopping) syncRun(); }, 60000);
+
+$('stop').addEventListener('click', async () => {
+  if (!stopArmed) {                       // two steps, so it can't be hit by accident
+    stopArmed = true; paintRun();
+    setTimeout(() => { stopArmed = false; paintRun(); }, 3000);
+    return;
+  }
+  stopArmed = false; stopping = true; paintRun();
+  try { await api('/api/stop', 'POST'); setStatus('workflow stopping\u2026'); }
+  catch (e) {
+    stopping = false; paintRun();
+    setStatus(e.message || 'could not stop the workflow');
+    setTimeout(() => setStatus((tabs.get(active) || {}).status || ''), 3000);
+  }
+});
+
+async function startApp() {
+  $('login').hidden = true;
+  $('app').hidden = false;
+  syncRun();
+  await ready();
+  if (tabs.size) {                       // came back after the session expired: reattach
+    for (const t of tabs.values()) {
+      if (!t.ws || t.ws.readyState > 1) { clearTimeout(t.timer); t.retry = 0; connect(t); }
+    }
+    focusActive();
+    return;
+  }
+  let list = [];
+  try { list = (await api('/api/tabs')).tabs; } catch { /* handled below */ }
+  if (!list.length) {
+    try { list = [await api('/api/tabs', 'POST')]; }
+    catch { showLogin('could not start a shell'); return; }
+  }
+  let want = null;
+  try { want = localStorage.getItem('oir.tab'); } catch {}
+  for (const m of list) await addTab(m);
+  activate(list.some((m) => m.id === want) ? want : list[0].id);
+}
+
+function sendResize(t) {
+  if (t.ws && t.ws.readyState === WebSocket.OPEN) {
+    t.ws.send(JSON.stringify({ type: 'resize', cols: t.term.cols, rows: t.term.rows }));
+  }
+}
+
+// Coalesce bursts of output into one write per frame, so a flood of small chunks
+// (build logs, `cat bigfile`) doesn't make the terminal re-render for every one.
+function queueWrite(t, chunk) {
+  t.wbuf.push(chunk); t.wsize += chunk.length;
+  if (!t.wraf) t.wraf = requestAnimationFrame(() => flushWrites(t));
+}
+// ghostty-web only notices title changes in string writes, and we write bytes, so read
+// OSC 0/2 ("\e]0;title\a") out of the stream here. The shell sets it to the directory.
+const td = new TextDecoder();
+function scanTitle(t, bytes) {
+  let buf = bytes;
+  if (t.carry) {                          // an escape sequence was cut off by the last chunk
+    buf = new Uint8Array(t.carry.length + bytes.length);
+    buf.set(t.carry); buf.set(bytes, t.carry.length);
+    t.carry = null;
+  }
+  let title = null, from = 0;
+  for (;;) {
+    const i = buf.indexOf(0x1b, from);
+    if (i < 0) break;
+    if (buf.length - i < 4) { t.carry = buf.slice(i); break; }
+    const osc = buf[i + 1] === 0x5d && (buf[i + 2] === 0x30 || buf[i + 2] === 0x32) && buf[i + 3] === 0x3b;
+    if (!osc) { from = i + 1; continue; }
+    const limit = Math.min(buf.length, i + 4 + 1024);
+    let end = -1;
+    for (let k = i + 4; k < limit; k++) {
+      if (buf[k] === 0x07) { end = k; break; }
+      if (buf[k] === 0x1b && buf[k + 1] === 0x5c) { end = k; break; }
+    }
+    if (end < 0) {
+      if (limit === buf.length) t.carry = buf.slice(i);   // not finished yet: wait for more
+      break;
+    }
+    title = td.decode(buf.subarray(i + 4, end));
+    from = end + 1;
+  }
+  if (title !== null) {
+    const next = title.trim() || t.base;
+    if (next !== t.name) { t.name = next; renderTabs(); }
+  }
+}
+
+function flushWrites(t) {
+  t.wraf = 0;
+  if (!t.wbuf.length) return;
+  const out = t.wbuf.length === 1 ? t.wbuf[0] : new Uint8Array(t.wsize);
+  if (t.wbuf.length > 1) { let o = 0; for (const c of t.wbuf) { out.set(c, o); o += c.length; } }
+  t.wbuf = []; t.wsize = 0;
+  if (t.hint) { t.hint = false; t.term.write('\r\x1b[2K'); }   // wipe the "starting shell" line
+  scanTitle(t, out);
+  t.term.write(out);
+}
+
+function connect(t) {
+  if (t.closing) return;
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const ws = new WebSocket(`${proto}${location.host}/ws?tab=${t.id}`);
+  t.ws = ws;
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    t.retry = 0;
+    t.status = '';
+    if (t.id === active) setStatus('');
+    t.wbuf = []; t.wsize = 0; t.carry = null;
+    t.quietUntil = performance.now() + 800;   // the scrollback replay isn't "new output"
+    t.term.write('\x1bc');                    // clear; the server replays the scrollback
+    if (t.fresh) {                            // a new shell takes a moment: say so instead of looking stuck
+      t.fresh = false; t.hint = true;
+      t.term.write('\x1b[2mstarting shell\u2026\x1b[0m');
+    }
+    sendResize(t);                            // first resize also starts the shell if none is running
+    if (t.id === active) t.term.focus();
+  };
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === 'string') {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'exit') {
+        t.ended = true;
+        t.term.write(`\r\n\x1b[2m[session ended. press any key to start a new one]\x1b[0m\r\n`);
+      }
+      return;
+    }
+    queueWrite(t, new Uint8Array(ev.data));
+    if (t.id !== active && !t.unread && performance.now() > t.quietUntil) { t.unread = true; renderTabs(); }
+  };
+  ws.onclose = async () => {
+    if (t.closing || t.ws !== ws) return;
+    if (stopping) { setStatus('workflow stopped'); return; }
+    if (!(await authed())) { showLogin('session expired'); return; }
+    // closed from another browser? then there is nothing to reconnect to
+    const list = await api('/api/tabs').then((r) => r.tabs).catch(() => null);
+    if (list && !list.some((m) => m.id === t.id)) { dropTab(t.id); return; }
+    const wait = Math.min(1000 * 2 ** t.retry++, 10000);
+    t.status = `<span class="dot"></span>reconnecting in ${Math.round(wait / 1000)}s`;
+    if (t.id === active) setStatus(t.status);
+    t.timer = setTimeout(() => connect(t), wait);
+  };
+}
+
+/* ---- keys the browser normally keeps for itself --------------------------------
+   Ctrl+W / Ctrl+T / Ctrl+N and friends are reserved by the browser and a page cannot
+   intercept them in a normal tab. In fullscreen, Chromium browsers let a page lock the
+   keyboard (Keyboard Lock API), which hands those keys to the page. So: one click on
+   "capture keys" enters fullscreen and locks. Firefox and Safari have no such API. */
+const capBtn = $('capture');
+const canLock = !!(navigator.keyboard && navigator.keyboard.lock);
+
+async function setCapture(on) {
+  try {
+    if (on) {
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      if (canLock) await navigator.keyboard.lock();
+      localStorage.setItem('oir.capture', '1');
+    } else {
+      if (canLock) navigator.keyboard.unlock();
+      if (document.fullscreenElement) await document.exitFullscreen();
+      localStorage.removeItem('oir.capture');
+    }
+  } catch { /* needs a user gesture, or the browser refused */ }
+  refreshCapture();
+}
+function refreshCapture() {
+  const on = !!document.fullscreenElement;
+  capBtn.classList.toggle('on', on);
+  capBtn.textContent = on ? 'keys captured' : 'capture keys';
+  if (!canLock) capBtn.title = 'This browser cannot capture Ctrl+W/T/N. Chrome, Edge and Brave can.';
+}
+capBtn.addEventListener('click', () => setCapture(!document.fullscreenElement));
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && canLock) navigator.keyboard.unlock();
+  refreshCapture();
+  setTimeout(focusActive, 50);
+});
+
+// If Ctrl+W still slips through in a normal tab, the browser asks before closing.
+window.addEventListener('beforeunload', (e) => {
+  if ([...tabs.values()].some((t) => t.ws && t.ws.readyState === WebSocket.OPEN)) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* ---- one cursor: hide the mouse pointer while typing ---- */
+window.addEventListener('keydown', () => document.body.classList.add('typing'), true);
+window.addEventListener('mousemove', () => document.body.classList.remove('typing'), true);
+
+// Highlight the button once there is something to submit.
+$('pw').addEventListener('input', () => $('go').classList.toggle('ready', !!$('pw').value));
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if ($('go').disabled || !$('pw').value) { $('pw').focus(); return; }
+  $('go').disabled = true;
+  $('err').textContent = '';
+  const wantCapture = localStorage.getItem('oir.capture') === '1';
+  if (wantCapture) setCapture(true);            // still inside the click/enter gesture
+  let res;
+  try {
+    res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: $('pw').value }),
+    });
+  } catch {
+    $('err').textContent = 'network error';
+    $('go').disabled = false;
+    return;
+  }
+  $('pw').value = '';
+  $('go').classList.remove('ready');
+  $('go').disabled = false;
+  if (res.ok) startApp();
+  else { $('err').textContent = ((await res.json().catch(() => ({}))).error) || 'login failed'; $('pw').focus(); }
+});
+
+refreshCapture();
+if (await authed()) startApp(); else showLogin();
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# wr FILE  <stdin>  writes stdin as the whole file
+f="${1:?usage: wr FILE < content}"
+mkdir -p "$(dirname "$f")" && cat > "$f" && echo .

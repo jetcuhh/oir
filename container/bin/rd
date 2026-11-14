@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# rd FILE [start] [end]  numbered lines, max 200 per call
+f="${1:?usage: rd FILE [start] [end]}"; s="${2:-1}"; e="${3:-$((s+199))}"
+(( e - s > 399 )) && e=$((s+399))
+[[ -f "$f" ]] || { echo "not found: $f"; exit 1; }
+awk -v s="$s" -v e="$e" 'NR>=s&&NR<=e{printf "%d\t%s\n",NR,$0} NR>e{m++} END{if(m)printf "[%d more lines]\n",m}' "$f"

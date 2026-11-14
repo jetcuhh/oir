@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# git hook: strip AI attribution from commit messages.
+sed -i -E '/^(Co-Authored-By|Claude-Session):.*/Id; /Generated with.*(Claude|Anthropic|AI)|^🤖|noreply@anthropic\.com|claude\.ai\/code/Id' "$1"
+# drop trailing blank lines left behind
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$1"

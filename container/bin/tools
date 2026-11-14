@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+cat <<'T'
+rd FILE [s] [e]   numbered lines (200 max)
+edit FILE <<'X'   old / ===== / new / X   (one exact match; empty old = write file)
+wr FILE <<'X'     stdin becomes the file
+gl 'GLOB' [dir]   find files (100 max)
+rg PATTERN [path] search (ripgrep)
+handoff [add T]   resume notes + last commands
+Max 90s per call: for long jobs use `nohup CMD >/tmp/out/x.log 2>&1 &` then `tail`.
+Success prints "." Long output is cut; the full log is in /tmp/out/.
+T

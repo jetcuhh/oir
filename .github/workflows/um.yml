@@ -1,0 +1,251 @@
+name: Oir
+
+run-name: Oir${{ inputs.debug && ' (debug)' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Verbose logging (set -x) + extra diagnostics"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write   # lets the web terminal's "Stop the workflow?" prompt cancel this run
+
+jobs:
+  Oir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      REPO_DIR: /home/runner/${{ github.event.repository.name }}
+      DEBUG: ${{ inputs.debug }}
+      WEB_PORT: "7681"
+      VENV: /home/runner/venv
+
+    steps:
+      # The 6h limit counts from the start of the job; the web terminal reads this
+      # to show how much time is left.
+      - name: Record start time
+        run: date +%s > "$HOME/oir.started"
+
+      - name: Check secrets
+        env:
+          OIR_PASSWORD: ${{ secrets.OIR_PASSWORD }}
+          TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ ${#OIR_PASSWORD} -lt 6 ]]; then
+            echo "::error title=Missing secret::Add repository secret OIR_PASSWORD (at least 6 characters; longer is safer). It is the password for the web terminal."
+            exit 1
+          fi
+          if [[ -z "$TOKEN" ]]; then
+            echo "::warning title=No TOKEN::Secret TOKEN is not set, so gh/git inside the container will be unauthenticated"
+          fi
+          echo "secrets ok (password ${#OIR_PASSWORD} chars, token $([[ -n "$TOKEN" ]] && echo set || echo missing))"
+
+      - name: Clone repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh repo clone "$GITHUB_REPOSITORY" "$REPO_DIR" -- --quiet --branch "$GITHUB_REF_NAME"
+          echo "cloned $(git -C "$REPO_DIR" log --oneline -1)"
+
+      - name: Store GitHub token for the container
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$TOKEN" ]]; then
+            (umask 077; printf '%s' "$TOKEN" > "$HOME/.token")
+          fi
+
+      - name: Pre-build dev container (background)
+        run: |
+          setsid nohup bash "$REPO_DIR/container/doc.sh" --prebuild \
+            > "$HOME/prebuild.log" 2>&1 < /dev/null &
+          echo "prebuild running in the background (pid $!)"
+
+      # Not fatal: without it the page falls back to the system monospace font.
+      - name: Fetch JetBrainsMono Nerd Font
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          [[ "$DEBUG" != true ]] || set -x
+          python3 -m venv "$VENV"
+          "$VENV/bin/pip" install -q aiohttp fonttools brotli
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "$tmp/jb.zip" \
+            https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip
+          mkdir -p "$REPO_DIR/web/fonts"
+          for face in Regular Bold Italic BoldItalic; do
+            unzip -j -q "$tmp/jb.zip" "JetBrainsMonoNerdFontMono-$face.ttf" -d "$tmp"
+            "$VENV/bin/python" -m fontTools.ttLib.woff2 compress -q \
+              -o "$REPO_DIR/web/fonts/JetBrainsMonoNerdFontMono-$face.woff2" \
+              "$tmp/JetBrainsMonoNerdFontMono-$face.ttf"
+          done
+          rm -rf "$tmp"
+          echo "font ready: $(ls "$REPO_DIR/web/fonts" | wc -l) faces, $(du -sh "$REPO_DIR/web/fonts" | cut -f1)"
+
+      - name: Start web terminal (ghostty-web, loopback only)
+        env:
+          OIR_PASSWORD: ${{ secrets.OIR_PASSWORD }}
+          # Used only by the runner shell's "Stop the workflow?" prompt, and never
+          # passed into the container.
+          OIR_CANCEL_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$DEBUG" != true ]] || set -x
+
+          (cd "$REPO_DIR/web" && npm install --omit=dev --no-audit --no-fund --silent)
+          [[ -x "$VENV/bin/python" ]] || python3 -m venv "$VENV"
+          "$VENV/bin/pip" install -q aiohttp
+
+          cd "$REPO_DIR"
+          HOST=127.0.0.1 PORT="$WEB_PORT" OIR_CMD="bash web/session.sh" \
+            setsid nohup "$VENV/bin/python" web/server.py \
+            > "$HOME/web.log" 2>&1 < /dev/null &
+
+          for _ in $(seq 1 30); do
+            curl -fsS "http://127.0.0.1:$WEB_PORT/healthz" >/dev/null 2>&1 && break
+            sleep 1
+          done
+          if ! curl -fsS "http://127.0.0.1:$WEB_PORT/healthz" >/dev/null 2>&1; then
+            echo "::error title=Web terminal::server did not start"
+            cat "$HOME/web.log" || true
+            exit 1
+          fi
+          echo "web terminal up on 127.0.0.1:$WEB_PORT"
+
+      - name: Open a Cloudflare quick tunnel
+        run: |
+          set -euo pipefail
+          [[ "$DEBUG" != true ]] || set -x
+
+          curl -fsSL -o "$HOME/cloudflared" \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x "$HOME/cloudflared"
+
+          setsid nohup "$HOME/cloudflared" tunnel --no-autoupdate \
+            --url "http://127.0.0.1:$WEB_PORT" \
+            > "$HOME/cloudflared.log" 2>&1 < /dev/null &
+
+          URL=""
+          for _ in $(seq 1 60); do
+            URL="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$HOME/cloudflared.log" \
+                   | grep -v '^https://api\.' | head -n1 || true)"
+            [[ -n "$URL" ]] && break
+            sleep 1
+          done
+          if [[ -z "$URL" ]]; then
+            echo "::error title=Tunnel::cloudflared did not report a trycloudflare.com address"
+            tail -n 40 "$HOME/cloudflared.log" || true
+            exit 1
+          fi
+
+          # The new hostname can take a few seconds to resolve.
+          reachable=false
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null "$URL/healthz" 2>/dev/null; then reachable=true; break; fi
+            sleep 2
+          done
+          [[ "$reachable" == true ]] || echo "::warning title=Tunnel::$URL is not reachable from the runner yet; it may need another minute"
+
+          mkdir -p "$HOME/link"
+          printf '%s\n' "$URL" > "$HOME/link/url.txt"
+          echo "tunnel $URL ($([[ "$reachable" == true ]] && echo reachable || echo 'not reachable yet'))"
+
+          {
+            echo "### Runner ready"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Open | $URL |"
+            echo "| Login | the \`OIR_PASSWORD\` repository secret |"
+            echo "| Stop | \`exit\` in the container, \`exit\` on the runner, answer \`y\` (or \`./connect.sh stop\`) |"
+            echo "| Lifetime | 6h max, and the link changes on every run |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Artifacts are downloadable while the run is still going, which is how
+      # connect.sh finds the link (early: connect.sh then follows the container build through /api/status).
+      # The link alone is useless without the password.
+      - name: Publish the link for connect.sh
+        uses: actions/upload-artifact@v4
+        with:
+          name: oir-link-${{ github.run_id }}
+          path: /home/runner/link/url.txt
+          retention-days: 1
+
+      # connect.sh only prints the link once this step has passed, so the page opens
+      # straight into a shell instead of a build log.
+      - name: Wait for the container
+        run: |
+          for _ in $(seq 1 450); do
+            if grep -q 'Oir container is ready' "$HOME/prebuild.log" 2>/dev/null; then
+              echo "container ready"
+              exit 0
+            fi
+            if ! pgrep -f 'doc.sh --prebuild' >/dev/null; then
+              echo "::error title=Container::the prebuild stopped before the container was ready"
+              tail -n 60 "$HOME/prebuild.log" 2>/dev/null || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "::error title=Container::timed out after 15 min waiting for the container"
+          tail -n 60 "$HOME/prebuild.log" 2>/dev/null || true
+          exit 1
+
+      - name: Keep runner alive (one line every 5 min)
+        run: |
+          for ((i = 1; i <= 72; i++)); do
+            web=ok; tun=ok
+            pgrep -f 'web/server.py' >/dev/null || web=DOWN
+            pgrep -x cloudflared     >/dev/null || tun=DOWN
+            if pgrep -f 'doc.sh --prebuild' >/dev/null; then ctr="building"
+            else ctr="$(docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | head -n1)"; fi
+            printf '[%s] %2d/72  up %s  web %s  tunnel %s  container: %s\n' \
+              "$(date -u +%H:%M)" "$i" "$(uptime -p | sed 's/^up //')" "$web" "$tun" "${ctr:-none}"
+
+            if [[ "$web" == DOWN ]]; then
+              echo "::error title=Web terminal::server process is gone"
+              tail -n 40 "$HOME/web.log" 2>/dev/null || true
+              exit 1
+            fi
+            if [[ "$tun" == DOWN ]]; then
+              echo "::error title=Tunnel::cloudflared is gone, so the link no longer works"
+              exit 1
+            fi
+            if [[ "$ctr" != building ]] && ! grep -q 'Oir container is ready' "$HOME/prebuild.log" 2>/dev/null; then
+              echo "::warning title=Prebuild::container prebuild is not running and never reported ready"
+              tail -n 20 "$HOME/prebuild.log" 2>/dev/null || true
+            fi
+            sleep 300
+          done
+
+      - name: Diagnostics (on failure)
+        if: failure()
+        run: |
+          {
+            echo "### Diagnostics"
+            echo '```'
+            echo "== web.log (tail) ==";        tail -n 30 "$HOME/web.log" 2>&1 || true
+            echo "== cloudflared processes =="; pgrep -a cloudflared 2>&1 || echo "not running"
+            echo "== docker ==";                docker ps -a 2>&1 || true
+            echo "== prebuild.log (tail) ==";   tail -n 60 "$HOME/prebuild.log" 2>&1 || true
+            echo "== disk/mem =="; df -h / ; free -h
+            echo '```'
+          } 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oir-logs-${{ github.run_id }}
+          path: |
+            /home/runner/prebuild.log
+            /home/runner/web.log
+          if-no-files-found: ignore
+          retention-days: 3

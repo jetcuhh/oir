@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# handoff               resume notes + last 15 commands (start of a chat)
+# handoff add TEXT      append a timestamped note (after each milestone)
+# handoff set <<'X'     replace all notes (keep them short: goal / done / next / gotchas)
+d="$HOME/.handoff"; mkdir -p "$d"; n="$d/notes.md"
+case "${1:-}" in
+  add) shift; printf '[%s] %s\n' "$(date +%H:%M)" "$*" >> "$n"; echo . ;;
+  set) cat > "$n"; echo . ;;
+  *)
+    if [ -s "$n" ]; then
+      t="$(wc -l < "$n")"; [ "$t" -gt 40 ] && echo "(+$((t-40)) older lines in $n)"
+      tail -n 40 "$n"
+    else echo "(no notes yet)"; fi
+    if [ -s "$d/cmds.log" ]; then echo "--- last commands ---"; tail -n 15 "$d/cmds.log"; fi ;;
+esac

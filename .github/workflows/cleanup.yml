@@ -1,0 +1,52 @@
+name: Cleanup
+
+# A run can't delete itself while it is still going, so this fires once an Oir run
+# has finished (stopped from the page, `./connect.sh stop`, the 6h limit, or a clean
+# exit) and removes it from the Actions history. A run that failed is kept, because
+# its logs are what you need to see why.
+on:
+  workflow_run:
+    workflows: ["Oir"]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  tidy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+      - name: Delete the finished run unless it failed
+        run: |
+          case "$CONCLUSION" in
+            success|cancelled|timed_out|skipped|neutral) ;;
+            *)
+              echo "run #$RUN_ID ended as '$CONCLUSION': keeping it so you can read the logs"
+              exit 0
+              ;;
+          esac
+          # GitHub occasionally still reports a just-finished run as in progress
+          for attempt in 1 2 3 4 5; do
+            if gh api -X DELETE "repos/$REPO/actions/runs/$RUN_ID"; then
+              echo "deleted run #$RUN_ID ($CONCLUSION)"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::warning::couldn't delete run #$RUN_ID"
+
+      # This workflow leaves a run behind of its own; clear the earlier ones so at
+      # most the latest remains (a run can't delete itself).
+      - name: Remove earlier cleanup runs
+        run: |
+          gh run list -R "$REPO" -w cleanup.yml -s completed -L 100 \
+            --json databaseId --jq '.[].databaseId' |
+          while read -r id; do
+            gh api -X DELETE "repos/$REPO/actions/runs/$id" >/dev/null 2>&1 && echo "deleted cleanup run #$id" || true
+          done
