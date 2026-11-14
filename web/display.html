@@ -18,7 +18,16 @@ function go() {
   const rfb = new RFB(document.getElementById('screen'),
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/vnc`);
   rfb.scaleViewport = true;
-  rfb.addEventListener('connect', () => { msg.hidden = true; rfb.focus(); });
+  let last = '';
+  const push = () => navigator.clipboard.readText().then(t => {
+    if (t && t !== last) { last = t; rfb.clipboardPasteFrom(t); }
+  }).catch(() => {});
+  rfb.addEventListener('clipboard', e => {
+    last = e.detail.text;
+    navigator.clipboard.writeText(last).catch(() => {});
+  });
+  window.addEventListener('focus', push);
+  rfb.addEventListener('connect', () => { msg.hidden = true; rfb.focus(); push(); });
   rfb.addEventListener('disconnect', () => {
     msg.hidden = false; msg.textContent = 'reconnecting...';
     setTimeout(go, 2000);
