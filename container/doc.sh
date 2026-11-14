@@ -57,14 +57,9 @@ RUN pacman -Syu --noconfirm && \
         nodejs npm \
         jdk21-openjdk jdk25-openjdk \
         sway wayvnc grim chromium mesa libglvnd wl-clipboard swaybg ttf-dejavu \
-        procps-ng croc  chafa libcap ripgrep fd && \
+        procps-ng croc  chafa libcap ripgrep fd \
+        zig clang unzip p7zip unrar xz bzip2 zstd lz4 libarchive && \
     pacman -Scc --noconfirm
-
-# Zig is pinned: unn needs 0.17.0 and the Arch package lags.
-ARG ZIG_VERSION=0.17.0
-RUN z="zig-$(uname -m)-linux-$ZIG_VERSION" && \
-    curl --proto '=https' --tlsv1.2 -fsSL "https://ziglang.org/download/$ZIG_VERSION/$z.tar.xz" | tar -xJ -C /opt && \
-    ln -s "/opt/$z/zig" /usr/local/bin/zig
 
 # sway ships with cap_sys_nice=ep; Docker's capability bounding set rejects that
 # at execve ("Operation not permitted"), so drop it. sway runs fine without it.
@@ -167,6 +162,8 @@ RUN curl -fsSL https://raw.githubusercontent.com/jetdafih/dpath/main/install.sh 
 
 RUN curl -fsSL https://raw.githubusercontent.com/jetdafih/lantern/main/install.sh | sh
 
+RUN curl -fsSL https://raw.githubusercontent.com/jetdafih/yoink/cli/install.sh | sh
+
 # oshi and flint: build from source, install into ~/.local/bin, delete the checkout.
 RUN git clone --depth 1 https://github.com/jetdafih/oshi /tmp/oshi \
     && make -C /tmp/oshi install \
@@ -222,6 +219,8 @@ ensure_container() {
       "$CONTAINER_NAME:/home/jet/.local/bin/wayland-browser" >/dev/null 2>&1 || true
     docker exec -u jet "$CONTAINER_NAME" \
       chmod +x /home/jet/.local/bin/wayland-browser >/dev/null 2>&1 || true
+    docker exec -u jet "$CONTAINER_NAME" mkdir -p /home/jet/.local/share/oir >/dev/null 2>&1 || true
+    docker cp "$HERE/start.html" "$CONTAINER_NAME:/home/jet/.local/share/oir/start.html" >/dev/null 2>&1 || true
     if [ "${BROWSER:-0}" = "1" ]; then
       docker exec -u jet -e VNC_PORT="${VNC_PORT:-5900}" -e RES="${RES:-1440x900}" \
         "$CONTAINER_NAME" /home/jet/.local/bin/wayland-browser start \
@@ -233,7 +232,7 @@ ensure_container() {
   if [ -d "$HERE/bin" ]; then
     docker exec -u jet "$CONTAINER_NAME" mkdir -p /home/jet/.config /home/jet/.local/bin >/dev/null 2>&1 || true
     docker cp "$HERE/bin/ripgreprc" "$CONTAINER_NAME:/home/jet/.config/ripgreprc" >/dev/null 2>&1 || true
-    for f in rd edit wr gl tools handoff commit-msg swayrun chromiumoir; do
+    for f in rd edit wr gl tools handoff commit-msg swayrun chromiumoir mcptoken get put; do
       docker cp "$HERE/bin/$f" "$CONTAINER_NAME:/home/jet/.local/bin/$f" >/dev/null 2>&1 || true
     done
     # Git: strip AI attribution from commits, and set an identity so commits work everywhere.

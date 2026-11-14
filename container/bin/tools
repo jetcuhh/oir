@@ -7,6 +7,9 @@ gl 'GLOB' [dir]   find files (100 max)
 rg PATTERN [path] search (ripgrep)
 handoff [add T]   resume notes + last commands
 swayrun APP [A..] launch an app inside sway
+mcptoken          the MCP connector link
+get PATH          text, or a download link for binaries/folders
+put FILE <<'X'    stdin becomes the file (same as wr)
 chromiumoir [URL] chromium with the flags this container needs
 Max 90s per call: for long jobs use `nohup CMD >/tmp/out/x.log 2>&1 &` then `tail`.
 Success prints "." Long output is cut; the full log is in /tmp/out/.

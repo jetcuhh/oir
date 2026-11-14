@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# get PATH  text: print it. Binary, big file or folder (zipped): print a download link.
+p="$(readlink -f -- "${1:?usage: get PATH}")" && [ -e "$p" ] || { echo "not found: $1"; exit 1; }
+s="$HOME/dev/.share"; n="$(basename "$p")"
+if [ -d "$p" ]; then
+  n="$n.zip"; mkdir -p "$s" && (cd "$(dirname "$p")" && zip -qr "$s/$n" "$(basename "$p")") || exit 1
+elif [ "$(stat -c %s "$p")" -le 200000 ] && ! head -c 8192 "$p" | grep -qaP '\x00'; then
+  exec cat -- "$p"
+else
+  mkdir -p "$s" && cp -- "$p" "$s/$n" || exit 1
+fi
+l="$(head -n1 "$HOME/dev/.mcp" 2>/dev/null)"
+[ -n "$l" ] && echo "${l%/mcp/*}/f/${l##*/}/$n" || echo "$s/$n"

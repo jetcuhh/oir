@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # chromiumoir [URL...]  chromium with the flags this container needs (opens in the display)
 [ -n "${WAYLAND_DISPLAY:-}" ] || exec swayrun "$0" "$@"
+[ $# -gt 0 ] || set -- "file://$HOME/.local/share/oir/start.html"
 exec chromium --no-sandbox --disable-gpu --disable-dev-shm-usage --ozone-platform=wayland \
-  --force-dark-mode --no-first-run --no-default-browser-check --password-store=basic \
+  --test-type --force-dark-mode --no-first-run --no-default-browser-check --password-store=basic \
   --user-data-dir="${PROFILE:-$HOME/.cache/chromium-wayland}" "$@"

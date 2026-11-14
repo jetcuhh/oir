@@ -451,7 +451,7 @@ function flushWrites(t) {
   const out = t.wbuf.length === 1 ? t.wbuf[0] : new Uint8Array(t.wsize);
   if (t.wbuf.length > 1) { let o = 0; for (const c of t.wbuf) { out.set(c, o); o += c.length; } }
   t.wbuf = []; t.wsize = 0;
-  if (t.hint) { t.hint = false; t.term.write('\r\x1b[2K'); }   // wipe the "starting shell" line
+  if (t.hint) { t.hint = false; clearInterval(t.spin); t.term.write('\r\x1b[2K'); }   // wipe the spinner
   scanTitle(t, out);
   t.term.write(out);
 }
@@ -470,9 +470,10 @@ function connect(t) {
     t.wbuf = []; t.wsize = 0; t.carry = null;
     t.quietUntil = performance.now() + 800;   // the scrollback replay isn't "new output"
     t.term.write('\x1bc');                    // clear; the server replays the scrollback
-    if (t.fresh) {                            // a new shell takes a moment: say so instead of looking stuck
+    if (t.fresh) {                            // a new shell takes a moment: spin instead of looking stuck
       t.fresh = false; t.hint = true;
-      t.term.write('\x1b[2mstarting shell\u2026\x1b[0m');
+      let i = 0;
+      t.spin = setInterval(() => t.term.write(`\r\x1b[2m${'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[i++ % 10]}\x1b[0m`), 80);
     }
     sendResize(t);                            // first resize also starts the shell if none is running
     if (t.id === active) t.term.focus();
@@ -490,6 +491,7 @@ function connect(t) {
     if (t.id !== active && !t.unread && performance.now() > t.quietUntil) { t.unread = true; renderTabs(); }
   };
   ws.onclose = async () => {
+    clearInterval(t.spin);
     if (t.closing || t.ws !== ws) return;
     if (stopping) { setStatus('workflow stopped'); return; }
     if (!(await authed())) { showLogin('session expired'); return; }

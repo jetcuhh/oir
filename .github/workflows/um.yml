@@ -155,6 +155,9 @@ jobs:
 
           mkdir -p "$HOME/link"
           printf '%s\n' "$URL" > "$HOME/link/url.txt"
+          # for `mcptoken` in the container (~/dev is shared)
+          mkdir -p "$HOME/dev"
+          (umask 077; printf '%s/mcp/%s\n' "$URL" "$(cat "$HOME/mcp.token")" > "$HOME/dev/.mcp")
           echo "tunnel $URL ($([[ "$reachable" == true ]] && echo reachable || echo 'not reachable yet'))"
 
           {

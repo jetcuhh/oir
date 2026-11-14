@@ -29,4 +29,4 @@ The owner's philosophy is **minimalism**. Apply it to code, words, and tokens.
 - Verify with the cheapest check that proves it works.
 
 ## Tools (in the container, run via `sh`)
-`rd FILE [s] [e]` read lines · `edit FILE` replace one exact match (stdin: old, `=====`, new) · `wr FILE` write stdin · `gl 'GLOB'` find files · `rg` search · `handoff` resume notes (run first; `handoff add "..."` after each milestone, so another account can continue). Success prints `.`. `tools` lists them.
+`rd FILE [s] [e]` read lines · `edit FILE` replace one exact match (stdin: old, `=====`, new) · `wr FILE` write stdin · `put FILE` same as wr · `get PATH` print text, or a download link for binaries and folders · `gl 'GLOB'` find files · `rg` search · `handoff` resume notes (run first; `handoff add "..."` after each milestone, so another account can continue). Success prints `.`. `tools` lists them.

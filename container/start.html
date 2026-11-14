@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>oir</title>
+<style>
+  :root { color-scheme: dark; --a: #e37b66; }
+  html, body { margin: 0; height: 100%; background: #101318; color: #98a0ae; font: 15px ui-monospace, Menlo, Consolas, monospace; }
+  body { display: grid; place-content: center; justify-items: center; gap: 22px; }
+  svg { width: 120px; }
+  .eye { fill: #e8eaf0; } .pupil { fill: #101318; }
+  h1 { margin: 0; font-weight: 400; color: #e8eaf0; font-size: 28px; }
+  #t { color: var(--a); }
+  input { all: unset; width: min(420px, 80vw); padding: 10px 0; text-align: center; border-bottom: 1px solid #2a303b; color: #e8eaf0; transition: border-color .2s; }
+  input:focus { border-color: var(--a); } input::placeholder { color: #566; }
+</style>
+<svg viewBox="0 0 120 50"><circle class="eye" cx="32" cy="25" r="20"/><circle class="eye" cx="88" cy="25" r="20"/>
+<circle id="l" class="pupil" cx="32" cy="25" r="8"/><circle id="r" class="pupil" cx="88" cy="25" r="8"/></svg>
+<h1 id="g"></h1>
+<div id="t"></div>
+<input id="q" placeholder="search or type a url" autofocus autocomplete="off" spellcheck="false">
+<script>
+const $ = (id) => document.getElementById(id);
+const hi = ["still up?", "hello, world", "go on, poke around", "bonjour", "nice to see you"];
+const h = new Date().getHours();
+$("g").textContent = (h < 5 ? "psst, go to sleep" : h < 12 ? "good morning" : h < 18 ? "good afternoon" : "good evening");
+$("t").textContent = hi[Math.floor(Math.random() * hi.length)];
+addEventListener("pointermove", (e) => {
+  for (const [id, cx] of [["l", 32], ["r", 88]]) {
+    const el = $(id), b = el.ownerSVGElement.getBoundingClientRect(), s = b.width / 120;
+    const dx = e.clientX - (b.left + cx * s), dy = e.clientY - (b.top + 25 * s);
+    const d = Math.hypot(dx, dy) || 1, m = Math.min(10, d / 20);
+    el.setAttribute("cx", cx + (dx / d) * m); el.setAttribute("cy", 25 + (dy / d) * m);
+  }
+});
+$("q").addEventListener("keydown", (e) => {
+  const v = e.target.value.trim();
+  if (e.key !== "Enter" || !v) return;
+  location.href = /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(v) ? "https://" + v : /^https?:\/\//.test(v) ? v
+    : "https://www.google.com/search?cs=1&q=" + encodeURIComponent(v);
+});
+</script>

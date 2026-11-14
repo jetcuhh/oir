@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# put FILE  <stdin>  same as wr
+exec wr "$@"

@@ -188,7 +188,7 @@ cmd_stop() {
 
   for id in "${targets[@]}"; do
     if cancel_run "$id"; then
-      say "✓ stopped run #$id"
+      say "stopped run #$id"
       ok=$(( ok + 1 ))
     else
       warn "couldn't stop run #$id (already finished?)"
@@ -268,7 +268,7 @@ phase_done() {   # $1 phase, $2 seconds it took (empty when unknown)
   local t=""
   live_clear
   [[ -n "$2" ]] && t="  ${DIM}$(fmt_time "$2")${RST}"
-  say "  ✓ ${PHASE_LABELS[$1]}${t}"
+  say "  ${PHASE_LABELS[$1]}${t}"
   DONE_LINES=$(( DONE_LINES + 1 ))
 }
 
@@ -290,7 +290,7 @@ on_interrupt() {
     local ans
     read -r -p "Stop the runner now? [y/N] " ans || ans="n"
     if [[ "${ans:-n}" =~ ^[Yy] ]]; then
-      cancel_run "$RUN_ID" && say "✓ stopped" || warn "couldn't cancel (already finished?)"
+      cancel_run "$RUN_ID" && say "stopped" || warn "couldn't cancel (already finished?)"
       exit 130
     fi
   fi
@@ -419,10 +419,10 @@ wait_for_link() {
         esac ;;
     esac
     if (( cur < 0 )); then plabel="contacting github"; else plabel="${PHASE_LABELS[$cur]}"; fi
-    l1="  ${ACC}${frames[spin % ${#frames[@]}]}${RST} ${plabel}  ${DIM}$(fmt_time $(( SECONDS - phase_start ))) · $(fmt_time "$SECONDS") total${RST}"
+    l1="  ${ACC}${frames[spin % ${#frames[@]}]}${RST} ${plabel}  ${DIM}$(fmt_time "$SECONDS")${RST}"
     live_draw "$l1" "    ${DIM}$(trunc "$l2" "$w")${RST}" "    ${DIM}$(trunc "$l3" "$w")${RST}"
     spin=$(( spin + 1 ))
-    sleep 0.25
+    sleep 0.08
   done
 }
 
@@ -460,11 +460,10 @@ trap - INT
 
 reused=""
 [[ "$JOINED" == true ]] && reused="reused · "
-say "✓ ready ${DIM}${reused}run #$RUN_ID · ${took}${RST}"
+say "ready ${DIM}${reused}run #$RUN_ID · ${took}${RST}"
 say
 say "  ${ACC}${BOLD}${LINK_URL}${RST}"
-say
-say "  ${DIM}limit${RST} 6h   ${DIM}stop${RST} ./connect.sh stop"
+say "  ${DIM}run${RST}  https://github.com/$REPO/actions/runs/$RUN_ID"
 
 if [[ "$OPEN" == true ]]; then
   open_link

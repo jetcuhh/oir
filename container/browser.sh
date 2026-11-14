@@ -10,6 +10,7 @@ set -euo pipefail
 LOG="${LOG:-/tmp/wayland-remote}"
 RES="${RES:-1440x900}"
 VNC_PORT="${VNC_PORT:-5900}"
+START="file://$HOME/.local/share/oir/start.html"
 PROFILE="${PROFILE:-$HOME/.cache/chromium-wayland}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/xdg-$(id -u)}"
 
@@ -32,17 +33,17 @@ wayland_socket() {
 }
 
 launch_browser() {
-    local url="${1:-${BROWSER_URL:-https://example.com}}"
+    local url="${1:-${BROWSER_URL:-$START}}"
     export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-$(wayland_socket)}"
     setsid chromium --no-sandbox --disable-gpu --disable-dev-shm-usage \
-        --force-dark-mode --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
+        --test-type --force-dark-mode --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
         --password-store=basic --ozone-platform=wayland --start-maximized \
         --user-data-dir="$PROFILE" "$url" \
         >>"$LOG/chromium.log" 2>&1 </dev/null &
 }
 
 start() {
-    local url="${1:-${BROWSER_URL:-https://example.com}}"
+    local url="${1:-${BROWSER_URL:-$START}}"
 
     if alive sway; then
         if ! alive chromium; then
@@ -69,7 +70,7 @@ output HEADLESS-1 resolution $RES
 output HEADLESS-1 bg '#11111b' solid_color
 exec wayvnc 0.0.0.0 $VNC_PORT -f ${VNC_MAX_FPS:-30} -p -L info
 exec chromium --no-sandbox --disable-gpu --disable-dev-shm-usage \
-  --force-dark-mode --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
+  --test-type --force-dark-mode --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
   --password-store=basic --ozone-platform=wayland --start-maximized \
   --user-data-dir='$PROFILE' '$url'
 CONF

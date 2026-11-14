@@ -1,15 +1,12 @@
 """Minimal MCP server (Streamable HTTP, stateless) exposing the Oir container to Claude.
 
 Built to be cheap in tokens:
-  * three tools with one-line descriptions (tool schemas are re-sent every turn);
-    file helpers (rd, edit, wr, gl, rg) are plain commands in the container
+  * one tool with a one-line description (tool schemas are re-sent every turn);
+    file helpers (rd, edit, wr, gl, rg, get, put) are plain commands in the container
   * output has ANSI stripped, is capped, and keeps head + tail when cut
   * the full output of a cut command stays in the container (/tmp/out/N.log),
     so Claude greps/sed's it instead of you paying for it up front
-  * `edit` sends only old/new text, never whole files, and replies "."
-  * `get`/`put` move files. Text comes back inline; binaries and folders are
-    copied to the runner (folders zipped) and handed back as a download link,
-    because base64 would cost more tokens than the file is worth.
+  * `get` hands binaries and folders back as a download link served from ~/dev/.share
 
 Auth: the connector URL is /mcp/<token>, token = HMAC(OIR_PASSWORD, "oir-mcp").
 It is stable across runs and never needs a second secret. Claude's web connector UI
@@ -23,7 +20,6 @@ import json
 import os
 import re
 from pathlib import Path
-from urllib.parse import quote
 
 from aiohttp import web
 
@@ -33,19 +29,14 @@ WORKDIR = "/home/jet/dev"
 DEFAULT_MAX = 3000          # chars returned per command unless Claude asks for more
 HARD_MAX = 20000
 MAX_TIMEOUT = 90            # Cloudflare cuts requests at ~100s; run long jobs with nohup
-SHARE = Path("/tmp/oir-share")          # files copied out of the container for download
-LINK_FILE = Path.home() / "link" / "url.txt"
-CHUNK = 200_000             # bytes read from a file before it is shared instead of inlined
+SHARE = Path.home() / "dev" / ".share"  # `get` in the container drops downloads here
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\r")
 _SEM = asyncio.Semaphore(4)
 _ids = itertools.count(1)
-_TOK = ""                   # file-download token, set once routes() knows the password
 
 # Sent once on connect; MCP clients put this in Claude's context, so keep it tiny.
 # Full rules live in ~/.agents/AGENTS.md.
 INSTRUCTIONS = (
-    "Minimalism: smallest change, no extras. Batch commands (a && b). "
-    "Filter output (rg, head, tail, -q, --stat). No AI attribution in commits/PRs/code. "
     "First run `handoff` (resume notes); after each milestone `handoff add \"...\"`. "
     "Read ~/.agents/AGENTS.md. `tools` lists helpers."
 )
@@ -74,30 +65,6 @@ TOOLS = [
                 "max": {"type": "integer"},
             },
             "required": ["cmd"],
-        },
-    },
-    {
-        "name": "get",
-        "description": "Read a file from the container. Folders are zipped and return a download link.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "max": {"type": "integer"},
-            },
-            "required": ["path"],
-        },
-    },
-    {
-        "name": "put",
-        "description": "Write text to a file in the container; parent folders are created.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"},
-            },
-            "required": ["path", "content"],
         },
     },
 ]
@@ -166,78 +133,7 @@ async def tool_sh(a: dict) -> tuple[str, bool]:
     return shown or ".", False
 
 
-def _url(name: str) -> str:
-    """Public link for a shared file; falls back to the local path without a tunnel."""
-    try:
-        base = next(iter(LINK_FILE.read_text().split()), "")
-    except OSError:
-        base = ""
-    return f"{base.rstrip('/')}/f/{_TOK}/{quote(name)}" if base else str(SHARE / name)
-
-
-async def _copy_out(src: str, name: str) -> str:
-    SHARE.mkdir(parents=True, exist_ok=True)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "docker", "cp", f"{CONTAINER}:{src}", str(SHARE / name),
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-        _, err = await asyncio.wait_for(proc.communicate(), 120)
-    except (OSError, asyncio.TimeoutError):
-        return "copy failed"
-    return "" if proc.returncode == 0 else err.decode("utf-8", "replace").strip()[-200:]
-
-
-async def tool_get(a: dict) -> tuple[str, bool]:
-    path = str(a.get("path", "")).strip()
-    limit = max(200, min(int(a.get("max") or DEFAULT_MAX), HARD_MAX))
-    if not path:
-        return "path required", True
-    # docker cp resolves relative paths against /, so work with the absolute one.
-    code, out = await _docker(["bash", "-c",
-        'p="$(readlink -f -- "$1")" && '
-        '{ if [ -d "$p" ]; then echo "dir $p"; elif [ -f "$p" ]; then echo "file $p"; fi; }',
-        "_", path])
-    kind, _, path = out.decode("utf-8", "replace").strip().partition(" ")
-    if code or kind not in ("dir", "file"):
-        return f"not found: {path or a.get('path')}", True
-    base = os.path.basename(path) or "files"
-
-    if kind == "dir":
-        name = base + ".zip"
-        code, out = await _docker(["bash", "-c",
-            'mkdir -p /tmp/out && cd "$(dirname "$1")" && zip -qr "/tmp/out/$2" "$(basename "$1")"',
-            "_", path, name])
-        if code:
-            return out.decode("utf-8", "replace").strip()[-300:] or f"zip failed ({code})", True
-        err = await _copy_out(f"/tmp/out/{name}", name)
-        return (err, True) if err else (_url(name), False)
-
-    code, raw = await _docker(["head", "-c", str(CHUNK), "--", path])
-    if code:
-        return raw.decode("utf-8", "replace").strip()[-300:] or f"read failed ({code})", True
-    if b"\0" in raw[:8192]:                # binary: the link is the only useful form
-        err = await _copy_out(path, base)
-        return (err, True) if err else (_url(base), False)
-    shown, cut = _clip(raw.decode("utf-8", "replace"), limit)
-    if cut or len(raw) >= CHUNK:
-        if not (err := await _copy_out(path, base)):
-            shown += f"\n[full: {_url(base)}]"
-    return shown or ".", False
-
-
-async def tool_put(a: dict) -> tuple[str, bool]:
-    path = str(a.get("path", "")).strip()
-    data = a.get("content")
-    if not path or not isinstance(data, str):
-        return "path and content required", True
-    code, out = await _docker(["bash", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "_", path],
-                              stdin=data.encode())
-    if code:
-        return out.decode("utf-8", "replace").strip()[-300:] or f"exit {code}", True
-    return ".", False
-
-
-HANDLERS = {"sh": tool_sh, "get": tool_get, "put": tool_put}
+HANDLERS = {"sh": tool_sh}
 
 
 async def _handle(msg: dict) -> dict | None:
@@ -280,9 +176,7 @@ async def _handle(msg: dict) -> dict | None:
 
 
 def routes(password: str) -> list[web.RouteDef]:
-    global _TOK
     tok = token(password)
-    _TOK = tok
 
     async def endpoint(request: web.Request) -> web.Response:
         if not hmac.compare_digest(request.match_info["tok"].encode(), tok.encode()):
