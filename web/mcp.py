@@ -39,7 +39,7 @@ INSTRUCTIONS = (
     "Minimalism: smallest change, no extras. Batch commands (a && b). "
     "Filter output (rg, head, tail, -q, --stat). No AI attribution in commits/PRs/code. "
     "First run `handoff` (resume notes); after each milestone `handoff add \"...\"`. "
-    "`tools` lists helpers."
+    "Read ~/.agents/AGENTS.md. `tools` lists helpers."
 )
 
 # Runs inside the container: append the command (first 200 chars, one line) to the handoff
