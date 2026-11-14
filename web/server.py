@@ -529,15 +529,9 @@ VNC_START = asyncio.Lock()
 
 async def vnc_open() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     # The desktop isn't started with the container; start it on first use.
-    try:
-        return await asyncio.open_connection("127.0.0.1", VNC_PORT)
-    except OSError:
-        pass
+    # Don't probe the port: docker's published 127.0.0.1:5900 accepts connections
+    # even when nothing listens behind it. `start` is a no-op when already up.
     async with VNC_START:
-        try:
-            return await asyncio.open_connection("127.0.0.1", VNC_PORT)
-        except OSError:
-            pass
         proc = await asyncio.create_subprocess_exec(
             "docker", "exec", "-u", "jet", "-e", f"VNC_PORT={VNC_PORT}", CONTAINER,
             "wayland-browser", "start",

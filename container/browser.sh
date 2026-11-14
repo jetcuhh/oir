@@ -35,7 +35,7 @@ launch_browser() {
     local url="${1:-${BROWSER_URL:-https://example.com}}"
     export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-$(wayland_socket)}"
     setsid chromium --no-sandbox --disable-gpu --disable-dev-shm-usage \
-        --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
+        --force-dark-mode --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
         --password-store=basic --ozone-platform=wayland --start-maximized \
         --user-data-dir="$PROFILE" "$url" \
         >>"$LOG/chromium.log" 2>&1 </dev/null &
@@ -69,7 +69,7 @@ output HEADLESS-1 resolution $RES
 output HEADLESS-1 bg '#11111b' solid_color
 exec wayvnc 0.0.0.0 $VNC_PORT -f ${VNC_MAX_FPS:-30} -p -L info
 exec chromium --no-sandbox --disable-gpu --disable-dev-shm-usage \
-  --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
+  --force-dark-mode --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
   --password-store=basic --ozone-platform=wayland --start-maximized \
   --user-data-dir='$PROFILE' '$url'
 CONF
