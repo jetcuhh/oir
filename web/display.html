@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oir display</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #101318; color: #98A0AE; font: 13px ui-monospace, Menlo, Consolas, monospace; }
+  #screen { position: fixed; inset: 0; }
+  #msg { position: fixed; top: 10px; left: 14px; z-index: 1; }
+  [hidden] { display: none; }
+</style>
+<div id="msg">starting display...</div>
+<div id="screen"></div>
+<script type="module">
+import RFB from '/novnc/core/rfb.js';
+const msg = document.getElementById('msg');
+function go() {
+  const rfb = new RFB(document.getElementById('screen'),
+    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/vnc`);
+  rfb.scaleViewport = true;
+  rfb.addEventListener('connect', () => { msg.hidden = true; rfb.focus(); });
+  rfb.addEventListener('disconnect', () => {
+    msg.hidden = false; msg.textContent = 'reconnecting...';
+    setTimeout(go, 2000);
+  });
+}
+go();
+</script>

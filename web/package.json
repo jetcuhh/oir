@@ -3,6 +3,7 @@
   "private": true,
   "description": "Browser front end for the Oir runner shell (ghostty-web).",
   "dependencies": {
+    "@novnc/novnc": "^1.6.0",
     "ghostty-web": "^0.4.0"
   }
 }

@@ -61,6 +61,8 @@
   .tab .x { all: unset; cursor: pointer; min-width: 14px; padding: 0 2px; text-align: center; opacity: 0; }
   .tab:hover .x, .tab.active .x { opacity: .6; }
   .tab .x:hover { opacity: 1; color: var(--accent-hi); }
+  #display { all: unset; cursor: pointer; align-self: center; flex: none; padding: 0 4px 0 14px; color: var(--dim); font-size: 11px; white-space: nowrap; transition: color .15s; }
+  #display:hover { color: var(--fg); }
   .tab .x.arm { opacity: 1; color: var(--accent); }
   #add { all: unset; cursor: pointer; padding: 0 14px; display: flex; align-items: center;
     color: var(--dim); font-size: 16px; transition: color .15s; }
@@ -105,6 +107,7 @@
 <div id="app" hidden>
   <div id="bar">
     <div id="tabs"></div>
+    <a id="display" href="/display" target="_blank" rel="noopener" title="Wayland desktop (starts on first open)">display</a>
     <div id="run" hidden><span id="left"></span><button id="stop" type="button" title="Stop the GitHub workflow (shuts everything down)">stop</button></div>
   </div>
   <div id="panes"></div>

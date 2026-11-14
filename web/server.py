@@ -33,10 +33,13 @@ import mcp
 HERE = Path(__file__).resolve().parent
 DIST = HERE / "node_modules" / "ghostty-web" / "dist"
 FONTS = HERE / "fonts"
+NOVNC = HERE / "node_modules" / "@novnc" / "novnc"
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "7681"))
 PASSWORD = os.environ.get("OIR_PASSWORD", "")
+VNC_PORT = int(os.environ.get("VNC_PORT", "5900"))
+CONTAINER = os.environ.get("OIR_CONTAINER", "jetdafih")
 CMD = os.environ.get("OIR_CMD", "bash web/session.sh")
 CWD = os.environ.get("OIR_CWD", str(HERE.parent))
 
@@ -511,6 +514,71 @@ async def ws_handler(request: web.Request) -> web.StreamResponse:
     return ws
 
 
+async def display(request: web.Request) -> web.Response:
+    if not is_authed(request):
+        raise web.HTTPFound("/")
+    return web.Response(
+        body=(HERE / "display.html").read_bytes(),
+        content_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+VNC_START = asyncio.Lock()
+
+
+async def vnc_open() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    # The desktop isn't started with the container; start it on first use.
+    try:
+        return await asyncio.open_connection("127.0.0.1", VNC_PORT)
+    except OSError:
+        pass
+    async with VNC_START:
+        try:
+            return await asyncio.open_connection("127.0.0.1", VNC_PORT)
+        except OSError:
+            pass
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", "-u", "jet", "-e", f"VNC_PORT={VNC_PORT}", CONTAINER,
+            "wayland-browser", "start",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), 60)
+    return await asyncio.open_connection("127.0.0.1", VNC_PORT)
+
+
+async def vnc_handler(request: web.Request) -> web.StreamResponse:
+    if not is_authed(request):
+        return web.Response(status=401)
+    if not same_origin(request):
+        return web.Response(status=403)
+    try:
+        reader, writer = await vnc_open()
+    except (OSError, asyncio.TimeoutError):
+        return web.Response(status=502)
+
+    ws = web.WebSocketResponse(heartbeat=20, protocols=("binary",), max_msg_size=1 << 22)
+    await ws.prepare(request)
+
+    async def pump() -> None:
+        try:
+            while data := await reader.read(65536):
+                await ws.send_bytes(data)
+        finally:
+            await ws.close()
+
+    task = asyncio.create_task(pump())
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.BINARY:
+                writer.write(msg.data)
+                await writer.drain()
+    finally:
+        task.cancel()
+        writer.close()
+    return ws
+
+
 async def on_cleanup(app: web.Application) -> None:
     for s in list(SESSIONS.values()):
         s.kill()
@@ -529,6 +597,9 @@ def make_app() -> web.Application:
     app.router.add_get("/api/run", run_info)
     app.router.add_post("/api/stop", run_stop)
     app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/display", display)
+    app.router.add_get("/vnc", vnc_handler)
+    app.router.add_static("/novnc", NOVNC)
     app.router.add_static("/static", DIST)
     FONTS.mkdir(exist_ok=True)
     app.router.add_static("/fonts", FONTS)
