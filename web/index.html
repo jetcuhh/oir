@@ -6,6 +6,8 @@
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#101318">
 <title>Oir</title>
+<script type="importmap">{"imports":{"@wterm/core":"/wterm/core/dist/index.js","@wterm/dom":"/wterm/dom/dist/index.js","@wterm/ghostty":"/wterm/ghostty/dist/index.js"}}</script>
+<link rel="stylesheet" href="/wterm/dom/src/terminal.css">
 <!-- blank favicon -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E">
 <style>
@@ -75,8 +77,14 @@
   #stop.arm { color: var(--accent); }
   #panes { position: relative; flex: 1; min-height: 0; }
   /* hidden panes keep their size (visibility, not display) so the terminal stays fitted */
-  .pane { position: absolute; inset: 0; visibility: hidden; }
-  .pane.active { visibility: visible; }
+  .pane.wterm { position: absolute; inset: 0; visibility: hidden; padding: 0; border-radius: 0; box-shadow: none;
+    --term-font-family: var(--mono); --term-font-size: 16px;
+    --term-fg: #EAEFF5; --term-bg: #101318; --term-cursor: #E37B66; --term-selection-bg: #2c3342;
+    --term-color-0: #222733;  --term-color-1: #E37B66;  --term-color-2: #8DA882;  --term-color-3: #E0A568;
+    --term-color-4: #8999AA;  --term-color-5: #A58AA8;  --term-color-6: #809D9E;  --term-color-7: #C6CED8;
+    --term-color-8: #98A0AE;  --term-color-9: #F09A88;  --term-color-10: #A9C29F; --term-color-11: #EBBE8A;
+    --term-color-12: #A5B3C2; --term-color-13: #BFA6C2; --term-color-14: #9DB8B9; --term-color-15: #EAEFF5; }
+  .pane.wterm.active { visibility: visible; }
   /* one cursor only: the terminal's own block. The hidden textarea's caret and the
      mouse pointer are suppressed while you type; moving the mouse brings the pointer back. */
   .pane textarea { caret-color: transparent; }
@@ -119,23 +127,13 @@
 </div>
 
 <script type="module">
-import { init, Terminal, FitAddon } from '/static/ghostty-web.js';
+import { WTerm } from '@wterm/dom';
+import { GhosttyCore } from '@wterm/ghostty';
 
 const $ = (id) => document.getElementById(id);
 const enc = new TextEncoder();
-const FONT = '"JBM NF", ui-monospace, Menlo, Consolas, monospace';
 
-const THEME = {
-  background: '#101318', foreground: '#EAEFF5',
-  cursor: '#E37B66', cursorAccent: '#101318',
-  selectionBackground: '#2c3342',
-  black: '#222733',        red: '#E37B66',        green: '#8DA882',      yellow: '#E0A568',
-  blue: '#8999AA',         magenta: '#A58AA8',    cyan: '#809D9E',       white: '#C6CED8',
-  brightBlack: '#98A0AE',  brightRed: '#F09A88',  brightGreen: '#A9C29F', brightYellow: '#EBBE8A',
-  brightBlue: '#A5B3C2',   brightMagenta: '#BFA6C2', brightCyan: '#9DB8B9', brightWhite: '#EAEFF5',
-};
-
-const tabs = new Map();      // id -> tab {id, name, el, term, fit, ws, ...}
+const tabs = new Map();      // id -> tab {id, name, el, term, ws, ...}
 let active = null;
 let booted = null;
 
@@ -175,7 +173,7 @@ async function loadFonts() {
 }
 
 function ready() {
-  if (!booted) booted = Promise.all([init(), loadFonts()]);
+  if (!booted) booted = loadFonts();
   return booted;
 }
 
@@ -219,7 +217,7 @@ function activate(id) {
   renderTabs();
   setStatus(t.status || '');
   try { localStorage.setItem('oir.tab', id); } catch { /* storage may be off */ }
-  requestAnimationFrame(() => { try { t.fit.fit(); } catch {} t.term.focus(); });
+  requestAnimationFrame(() => { t.term.fit(); t.term.focus(); });
 }
 
 function focusActive() {
@@ -234,72 +232,23 @@ async function addTab({ id, name, alive }) {
   el.className = 'pane';
   $('panes').append(el);
 
-  const term = new Terminal({
-    fontSize: 16,
-    fontFamily: FONT,
-    cursorStyle: 'block',
-    cursorBlink: false,
-    theme: THEME,
-    scrollback: 5000,
-  });
-  const fit = new FitAddon();
-  term.loadAddon(fit);
-  term.open(el);
-  fit.fit();
-  fit.observeResize();
+  const term = new WTerm(el, { core: await GhosttyCore.load(), scrollbackLines: 5000, cursorBlink: false });
+  await term.init();
 
-  const t = { id, name, base: name, fresh: alive === false, hint: false, el, term, fit, ws: null, ended: false, retry: 0, timer: 0, status: '',
+  const t = { id, name, base: name, fresh: alive === false, hint: false, el, term, ws: null, ended: false, retry: 0, timer: 0, status: '',
               unread: false, armed: false, closing: false, quietUntil: 0, wbuf: [], wsize: 0, wraf: 0 };
   tabs.set(id, t);
 
-  // ghostty-web never forwards the wheel to a program that asked for mouse events;
-  // it sends arrow keys instead, so TUIs (opencode) scroll by focus, not by pointer.
-  // Send the real SGR wheel event: one per wheel notch, however the browser reports it.
-  const cell = (e) => {
-    const r = el.getBoundingClientRect();
-    return [Math.min(term.cols, Math.max(1, Math.floor((e.clientX - r.left) / (r.width / term.cols)) + 1)),
-            Math.min(term.rows, Math.max(1, Math.floor((e.clientY - r.top) / (r.height / term.rows)) + 1))];
-  };
-  const mouse = (e, b, end) => {
-    if (!t.ws || t.ws.readyState !== WebSocket.OPEN) return;
-    const [col, row] = cell(e);
-    t.ws.send(enc.encode(`\x1b[<${b | (e.altKey ? 8 : 0) | (e.ctrlKey ? 16 : 0)};${col};${row}${end}`));
-  };
-  let wheel = 0;
-  term.attachCustomWheelEventHandler((e) => {
-    if (!term.hasMouseTracking()) return false;          // shell/less: local scrollback, arrows
-    wheel += e.deltaY / (e.deltaMode === 1 ? 3 : e.deltaMode === 2 ? Math.max(1, term.rows / 3) : 100);
-    const n = Math.trunc(wheel);
-    wheel -= n;
-    if (!n) return true;
-    for (let i = 0; i < Math.abs(n); i++) mouse(e, n < 0 ? 64 : 65, 'M');
-    return true;
-  });
-
-  // Clicks and drags too: ghostty-web only does local selection. Shift+drag still selects locally.
-  let held = -1, lastCell = '';
-  el.addEventListener('mousedown', (e) => {
-    if (e.shiftKey || !term.hasMouseTracking() || !t.ws || t.ws.readyState !== WebSocket.OPEN) return;
-    e.preventDefault(); e.stopPropagation(); term.focus();
-    held = e.button; lastCell = ''; mouse(e, held, 'M');
-  }, true);
-  window.addEventListener('mousemove', (e) => {
-    if (held < 0 ? !(term.getMode(1003) && el.contains(e.target)) : !(term.getMode(1002) || term.getMode(1003))) return;
-    const k = cell(e).join(); if (k === lastCell) return;
-    lastCell = k; mouse(e, held < 0 ? 35 : held + 32, 'M');
-  }, true);
-  window.addEventListener('mouseup', (e) => {
-    if (held < 0) return;
-    mouse(e, held, 'm'); held = -1;
-  }, true);
-  el.addEventListener('contextmenu', (e) => { if (!e.shiftKey && term.hasMouseTracking()) e.preventDefault(); });
-
-  term.onData((d) => {
+  term.onData = (d) => {
     if (!t.ws || t.ws.readyState !== WebSocket.OPEN) return;
     if (t.ended) { t.ended = false; sendResize(t); return; }   // any key starts a new shell
     t.ws.send(enc.encode(d));
-  });
-  term.onResize(() => sendResize(t));
+  };
+  term.onResize = () => sendResize(t);
+  term.onTitle = (title) => {       // OSC 0/2; the shell sets it to the directory
+    const next = title.trim() || t.base;
+    if (next !== t.name) { t.name = next; renderTabs(); }
+  };
   renderTabs();
   connect(t);
   return t;
@@ -328,7 +277,7 @@ function dropTab(id) {
   clearTimeout(t.timer);
   if (t.wraf) cancelAnimationFrame(t.wraf);
   try { t.ws && t.ws.close(); } catch {}
-  try { t.term.dispose(); } catch {}
+  try { t.term.destroy(); } catch {}
   t.el.remove();
   tabs.delete(id);
   if (!tabs.size) { active = null; newTab(); return; }
@@ -424,7 +373,7 @@ async function startApp() {
 
 function sendResize(t) {
   if (t.ws && t.ws.readyState === WebSocket.OPEN) {
-    t.ws.send(JSON.stringify({ type: 'resize', cols: t.term.cols, rows: t.term.rows }));
+    t.ws.send(JSON.stringify({ type: 'resize', cols: t.term.cols, rows: t.term.rows, px: t.el.clientWidth, py: t.el.clientHeight }));
   }
 }
 
@@ -434,42 +383,6 @@ function queueWrite(t, chunk) {
   t.wbuf.push(chunk); t.wsize += chunk.length;
   if (!t.wraf) t.wraf = requestAnimationFrame(() => flushWrites(t));
 }
-// ghostty-web only notices title changes in string writes, and we write bytes, so read
-// OSC 0/2 ("\e]0;title\a") out of the stream here. The shell sets it to the directory.
-const td = new TextDecoder();
-function scanTitle(t, bytes) {
-  let buf = bytes;
-  if (t.carry) {                          // an escape sequence was cut off by the last chunk
-    buf = new Uint8Array(t.carry.length + bytes.length);
-    buf.set(t.carry); buf.set(bytes, t.carry.length);
-    t.carry = null;
-  }
-  let title = null, from = 0;
-  for (;;) {
-    const i = buf.indexOf(0x1b, from);
-    if (i < 0) break;
-    if (buf.length - i < 4) { t.carry = buf.slice(i); break; }
-    const osc = buf[i + 1] === 0x5d && (buf[i + 2] === 0x30 || buf[i + 2] === 0x32) && buf[i + 3] === 0x3b;
-    if (!osc) { from = i + 1; continue; }
-    const limit = Math.min(buf.length, i + 4 + 1024);
-    let end = -1;
-    for (let k = i + 4; k < limit; k++) {
-      if (buf[k] === 0x07) { end = k; break; }
-      if (buf[k] === 0x1b && buf[k + 1] === 0x5c) { end = k; break; }
-    }
-    if (end < 0) {
-      if (limit === buf.length) t.carry = buf.slice(i);   // not finished yet: wait for more
-      break;
-    }
-    title = td.decode(buf.subarray(i + 4, end));
-    from = end + 1;
-  }
-  if (title !== null) {
-    const next = title.trim() || t.base;
-    if (next !== t.name) { t.name = next; renderTabs(); }
-  }
-}
-
 function flushWrites(t) {
   t.wraf = 0;
   if (!t.wbuf.length) return;
@@ -477,7 +390,6 @@ function flushWrites(t) {
   if (t.wbuf.length > 1) { let o = 0; for (const c of t.wbuf) { out.set(c, o); o += c.length; } }
   t.wbuf = []; t.wsize = 0;
   if (t.hint) { t.hint = false; clearInterval(t.spin); t.term.write('\r\x1b[2K'); }   // wipe the spinner
-  scanTitle(t, out);
   t.term.write(out);
 }
 
@@ -492,7 +404,7 @@ function connect(t) {
     t.retry = 0;
     t.status = '';
     if (t.id === active) setStatus('');
-    t.wbuf = []; t.wsize = 0; t.carry = null;
+    t.wbuf = []; t.wsize = 0;
     t.quietUntil = performance.now() + 800;   // the scrollback replay isn't "new output"
     t.term.write('\x1bc');                    // clear; the server replays the scrollback
     if (t.fresh) {                            // a new shell takes a moment: spin instead of looking stuck

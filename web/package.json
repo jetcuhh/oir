@@ -1,9 +1,10 @@
 {
   "name": "oir-web",
   "private": true,
-  "description": "Browser front end for the Oir runner shell (ghostty-web).",
+  "description": "Browser front end for the Oir runner shell (wterm).",
   "dependencies": {
     "@novnc/novnc": "^1.6.0",
-    "ghostty-web": "^0.4.0"
+    "@wterm/dom": "^0.5.10",
+    "@wterm/ghostty": "^0.5.10"
   }
 }

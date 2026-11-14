@@ -89,7 +89,7 @@ jobs:
           rm -rf "$tmp"
           echo "font ready: $(ls "$REPO_DIR/web/fonts" | wc -l) faces, $(du -sh "$REPO_DIR/web/fonts" | cut -f1)"
 
-      - name: Start web terminal (ghostty-web, loopback only)
+      - name: Start web terminal (wterm, loopback only)
         env:
           OIR_PASSWORD: ${{ secrets.OIR_PASSWORD }}
           # Used only by the runner shell's "Stop the workflow?" prompt, and never

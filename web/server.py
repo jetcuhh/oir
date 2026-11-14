@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Password-protected web terminal.
 
-Serves a ghostty-web page and bridges a WebSocket to one persistent PTY, so a
+Serves a wterm page and bridges a WebSocket to one persistent PTY, so a
 browser tab that reloads or reconnects lands back in the same shell.
 
 Environment:
@@ -31,7 +31,7 @@ from aiohttp import WSMsgType, web
 import mcp
 
 HERE = Path(__file__).resolve().parent
-DIST = HERE / "node_modules" / "ghostty-web" / "dist"
+DIST = HERE / "node_modules" / "@wterm"
 FONTS = HERE / "fonts"
 NOVNC = HERE / "node_modules" / "@novnc" / "novnc"
 
@@ -260,11 +260,10 @@ class Session:
             loop.remove_writer(self.fd)
             self.writer_on = False
 
-    def resize(self, cols: int, rows: int) -> None:
+    def resize(self, cols: int, rows: int, px: int = 0, py: int = 0) -> None:
         if not self.alive:
             self.spawn(cols, rows)
-            return
-        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, px, py))
 
     def kill(self) -> None:
         # The shell is a session leader, so its pid is also its process group id.
@@ -505,7 +504,7 @@ async def ws_handler(request: web.Request) -> web.StreamResponse:
                     if ctrl.get("type") == "resize":
                         cols, rows = int(ctrl["cols"]), int(ctrl["rows"])
                         if 1 <= cols <= 1000 and 1 <= rows <= 1000:
-                            session.resize(cols, rows)
+                            session.resize(cols, rows, min(int(ctrl.get("px", 0)), 65535), min(int(ctrl.get("py", 0)), 65535))
                 except (ValueError, KeyError, TypeError):
                     pass
     finally:
@@ -594,7 +593,7 @@ def make_app() -> web.Application:
     app.router.add_get("/display", display)
     app.router.add_get("/vnc", vnc_handler)
     app.router.add_static("/novnc", NOVNC)
-    app.router.add_static("/static", DIST)
+    app.router.add_static("/wterm", DIST)
     FONTS.mkdir(exist_ok=True)
     app.router.add_static("/fonts", FONTS)
     app.add_routes(mcp.routes(PASSWORD))
