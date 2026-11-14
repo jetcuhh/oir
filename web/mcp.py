@@ -104,8 +104,13 @@ def _clip(text: str, limit: int) -> tuple[str, int]:
         return text, 0
     head = limit * 2 // 5
     tail = limit - head
-    cut = len(text) - head - tail
-    return f"{text[:head]}\n[... {cut} chars cut ...]\n{text[-tail:]}", cut
+    top, bot = text[:head], text[-tail:]
+    if (i := top.rfind("\n")) > 0:
+        top = top[:i]
+    if (j := bot.find("\n")) >= 0:
+        bot = bot[j + 1:]
+    cut = len(text) - len(top) - len(bot)
+    return f"{top}\n[... {cut} chars cut ...]\n{bot}", cut
 
 
 async def tool_sh(a: dict) -> tuple[str, bool]:
