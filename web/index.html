@@ -255,19 +255,44 @@ async function addTab({ id, name, alive }) {
   // ghostty-web never forwards the wheel to a program that asked for mouse events;
   // it sends arrow keys instead, so TUIs (opencode) scroll by focus, not by pointer.
   // Send the real SGR wheel event: one per wheel notch, however the browser reports it.
+  const cell = (e) => {
+    const r = el.getBoundingClientRect();
+    return [Math.min(term.cols, Math.max(1, Math.floor((e.clientX - r.left) / (r.width / term.cols)) + 1)),
+            Math.min(term.rows, Math.max(1, Math.floor((e.clientY - r.top) / (r.height / term.rows)) + 1))];
+  };
+  const mouse = (e, b, end) => {
+    if (!t.ws || t.ws.readyState !== WebSocket.OPEN) return;
+    const [col, row] = cell(e);
+    t.ws.send(enc.encode(`\x1b[<${b | (e.altKey ? 8 : 0) | (e.ctrlKey ? 16 : 0)};${col};${row}${end}`));
+  };
   let wheel = 0;
   term.attachCustomWheelEventHandler((e) => {
     if (!term.hasMouseTracking()) return false;          // shell/less: local scrollback, arrows
     wheel += e.deltaY / (e.deltaMode === 1 ? 3 : e.deltaMode === 2 ? Math.max(1, term.rows / 3) : 100);
     const n = Math.trunc(wheel);
     wheel -= n;
-    if (!n || !t.ws || t.ws.readyState !== WebSocket.OPEN) return true;
-    const r = el.getBoundingClientRect(), btn = n < 0 ? 64 : 65;
-    const col = Math.min(term.cols, Math.max(1, Math.floor((e.clientX - r.left) / (r.width / term.cols)) + 1));
-    const row = Math.min(term.rows, Math.max(1, Math.floor((e.clientY - r.top) / (r.height / term.rows)) + 1));
-    for (let i = 0; i < Math.abs(n); i++) t.ws.send(enc.encode(`\x1b[<${btn};${col};${row}M`));
+    if (!n) return true;
+    for (let i = 0; i < Math.abs(n); i++) mouse(e, n < 0 ? 64 : 65, 'M');
     return true;
   });
+
+  // Clicks and drags too: ghostty-web only does local selection. Shift+drag still selects locally.
+  let held = -1, lastCell = '';
+  el.addEventListener('mousedown', (e) => {
+    if (e.shiftKey || !term.hasMouseTracking() || !t.ws || t.ws.readyState !== WebSocket.OPEN) return;
+    e.preventDefault(); e.stopPropagation(); term.focus();
+    held = e.button; lastCell = ''; mouse(e, held, 'M');
+  }, true);
+  window.addEventListener('mousemove', (e) => {
+    if (held < 0 ? !(term.getMode(1003) && el.contains(e.target)) : !(term.getMode(1002) || term.getMode(1003))) return;
+    const k = cell(e).join(); if (k === lastCell) return;
+    lastCell = k; mouse(e, held < 0 ? 35 : held + 32, 'M');
+  }, true);
+  window.addEventListener('mouseup', (e) => {
+    if (held < 0) return;
+    mouse(e, held, 'm'); held = -1;
+  }, true);
+  el.addEventListener('contextmenu', (e) => { if (!e.shiftKey && term.hasMouseTracking()) e.preventDefault(); });
 
   term.onData((d) => {
     if (!t.ws || t.ws.readyState !== WebSocket.OPEN) return;
